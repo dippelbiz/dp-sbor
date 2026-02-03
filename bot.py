@@ -1,8 +1,10 @@
+import os
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, CallbackQueryHandler, ContextTypes, filters
+from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, ContextTypes, filters
+from flask import Flask, request
 
 # ====== НАСТРОЙКИ ======
-TOKEN = "8513392038:AAEupfJ198a3AtNinoAsA2h2mmtFIDLOoqk"  # твой токен
+TOKEN = os.environ.get('BOT_TOKEN', "8513392038:AAEupfJ198a3AtNinoAsA2h2mmtFIDLOoqk")  # берем из переменных окружения
 
 # Список точек и продавцов
 pickup_points = {
@@ -20,15 +22,19 @@ sellers_chat_id = {
     "Татьяна": 2051690432
 }
 
+# ====== ИНИЦИАЛИЗАЦИЯ ======
+app = Application.builder().token(TOKEN).build()
+flask_app = Flask(__name__)
+
 # ====== КОМАНДЫ ======
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-" 🟢*Пошаговая инструкция*🟢\n\n"
-       "▪️ Напишите, что Вы хотите заказать\n"
-       "✉️ *Отправьте сообщение* ✉️\n\n"
-    "▪️ Появится список где можно забрать\n\n"
-    "▪️ Выберите, что будет удобнее",
- parse_mode="Markdown"
+        " 🟢*Пошаговая инструкция*🟢\n\n"
+        "▪️ Напишите, что Вы хотите заказать\n"
+        "✉️ *Отправьте сообщение* ✉️\n\n"
+        "▪️ Появится список где можно забрать\n\n"
+        "▪️ Выберите, что будет удобнее",
+        parse_mode="Markdown"
     )
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -49,7 +55,15 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if data == "NEW_ORDER":
         context.user_data.clear()
         await query.edit_message_text("Сделать новый заказ.")
-        await start(query, context)
+        # Отправляем стартовое сообщение
+        await query.message.reply_text(
+            " 🟢*Пошаговая инструкция*🟢\n\n"
+            "▪️ Напишите, что Вы хотите заказать\n"
+            "✉️ *Отправьте сообщение* ✉️\n\n"
+            "▪️ Появится список где можно забрать\n\n"
+            "▪️ Выберите, что будет удобнее",
+            parse_mode="Markdown"
+        )
         return
 
     point = data
@@ -78,13 +92,57 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         await query.edit_message_text(text="Ошибка. Попробуйте позже.")
 
-# ====== ЗАПУСК БОТА ======
+# ====== ДОБАВЛЯЕМ ОБРАБОТЧИКИ В ПРИЛОЖЕНИЕ ======
+app.add_handler(CommandHandler("start", start))
+app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+app.add_handler(CallbackQueryHandler(button))
+
+# ====== FLASK ДЛЯ WEBHOOK ======
+@flask_app.route('/webhook', methods=['POST'])
+async def webhook():
+    """Обработчик вебхука от Telegram"""
+    if request.headers.get('content-type') == 'application/json':
+        json_string = await request.get_data()
+        update = Update.de_json(json_string.decode('utf-8'), app.bot)
+        await app.process_update(update)
+        return ''
+    return 'Bad Request', 400
+
+@flask_app.route('/')
+def index():
+    """Главная страница для проверки работы"""
+    return '''
+    <h1>🤖 Telegram Bot работает!</h1>
+    <p>Бот запущен и готов принимать заказы.</p>
+    <p>Откройте Telegram и найдите бота.</p>
+    '''
+
+@flask_app.route('/set_webhook')
+async def set_webhook():
+    """Установка вебхука (вызывается автоматически)"""
+    # Удаляем старый вебхук
+    await app.bot.delete_webhook()
+    
+    # Получаем URL автоматически из переменных окружения Render
+    service_name = os.environ.get('RENDER_SERVICE_NAME', 'dp-sbor-bot')
+    webhook_url = f'https://{service_name}.onrender.com/webhook'
+    
+    # Устанавливаем новый вебхук
+    await app.bot.set_webhook(webhook_url)
+    
+    return f'✅ Webhook установлен: {webhook_url}'
+
+# ====== ЗАПУСК ======
 if __name__ == "__main__":
-    app = ApplicationBuilder().token(TOKEN).build()
-
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-    app.add_handler(CallbackQueryHandler(button))
-
-    print("Бот запущен...")
-    app.run_polling()
+    import asyncio
+    
+    # Проверяем, работаем ли на Render
+    if os.environ.get('RENDER'):
+        print("🚀 Запуск на Render с вебхуком...")
+        # Запускаем Flask сервер
+        from waitress import serve
+        serve(flask_app, host='0.0.0.0', port=10000)
+    else:
+        print("💻 Локальный запуск с polling...")
+        # Локальный запуск для тестирования
+        app.run_polling()
