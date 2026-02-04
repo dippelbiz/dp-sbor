@@ -1,34 +1,31 @@
 import os
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, ContextTypes, filters
+import telebot
 from flask import Flask, request
 
 # ====== НАСТРОЙКИ ======
-TOKEN = os.environ.get('BOT_TOKEN', "8513392038:AAEupfJ198a3AtNinoAsA2h2mmtFIDLOoqk")  # берем из переменных окружения
+TOKEN = os.environ.get('BOT_TOKEN', "8513392038:AAEupfJ198a3AtNinoAsA2h2mmtFIDLOoqk")
+bot = telebot.TeleBot(TOKEN)
+app = Flask(__name__)
 
 # Список точек и продавцов
 pickup_points = {
     "ул. Галащука 15": "Александр",
-    "ул. Беловежская 4/1": "Юлия",
+    "ул. Беловежская 4/1": "Юлия", 
     "ул. Забалуева 90": "Евгений",
     "ул. Сержанта Коротаева 3": "Татьяна"
 }
 
-# Соответствие продавцов и их chat_id
 sellers_chat_id = {
-    "Александр": 952957376,  # вставь реальные chat_id
+    "Александр": 952957376,
     "Юлия": 1518506615,
     "Евгений": 5750504640,
     "Татьяна": 2051690432
 }
 
-# ====== ИНИЦИАЛИЗАЦИЯ ======
-app = Application.builder().token(TOKEN).build()
-flask_app = Flask(__name__)
-
-# ====== КОМАНДЫ ======
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
+# ====== ОБРАБОТЧИКИ ======
+@bot.message_handler(commands=['start'])
+def start(message):
+    bot.reply_to(message,
         " 🟢*Пошаговая инструкция*🟢\n\n"
         "▪️ Напишите, что Вы хотите заказать\n"
         "✉️ *Отправьте сообщение* ✉️\n\n"
@@ -37,26 +34,31 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parse_mode="Markdown"
     )
 
-async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    context.user_data['message_text'] = update.message.text
-    context.user_data['user_name'] = update.message.from_user.first_name
-    context.user_data['user_id'] = update.message.from_user.id
+@bot.message_handler(func=lambda message: True)
+def handle_message(message):
+    from telebot import types
+    
+    # Сохраняем данные
+    bot.user_data = getattr(bot, 'user_data', {})
+    bot.user_data[message.chat.id] = {
+        'text': message.text,
+        'name': message.from_user.first_name,
+        'id': message.from_user.id
+    }
+    
+    # Создаем клавиатуру с адресами
+    keyboard = types.InlineKeyboardMarkup()
+    for point in pickup_points.keys():
+        keyboard.add(types.InlineKeyboardButton(point, callback_data=point))
+    
+    bot.reply_to(message, "Выберите удобный адрес:", reply_markup=keyboard)
 
-    keyboard = [[InlineKeyboardButton(point, callback_data=point)] for point in pickup_points.keys()]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-
-    await update.message.reply_text("Выберите удобный адрес:", reply_markup=reply_markup)
-
-async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    data = query.data
-
-    if data == "NEW_ORDER":
-        context.user_data.clear()
-        await query.edit_message_text("Сделать новый заказ.")
-        # Отправляем стартовое сообщение
-        await query.message.reply_text(
+@bot.callback_query_handler(func=lambda call: True)
+def handle_callback(call):
+    if call.data == "NEW_ORDER":
+        bot.answer_callback_query(call.id)
+        bot.edit_message_text("Сделать новый заказ.", call.message.chat.id, call.message.message_id)
+        bot.send_message(call.message.chat.id,
             " 🟢*Пошаговая инструкция*🟢\n\n"
             "▪️ Напишите, что Вы хотите заказать\n"
             "✉️ *Отправьте сообщение* ✉️\n\n"
@@ -65,84 +67,65 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode="Markdown"
         )
         return
-
-    point = data
-    message_text = context.user_data.get('message_text')
-    user_name = context.user_data.get('user_name')
-    user_id = context.user_data.get('user_id')
-
+    
+    point = call.data
+    user_data = getattr(bot, 'user_data', {}).get(call.message.chat.id, {})
+    
     seller_name = pickup_points.get(point)
     seller_id = sellers_chat_id.get(seller_name)
-
-    if seller_id:
-        await context.bot.send_message(
-            chat_id=seller_id,
-            text=f"Новый заказ!\nПокупатель: {user_name} [Написать](tg://user?id={user_id})\nТочка: {point}\nСообщение: {message_text}",
+    
+    if seller_id and user_data:
+        bot.send_message(
+            seller_id,
+            f"Новый заказ!\nПокупатель: {user_data['name']} [Написать](tg://user?id={user_data['id']})\n"
+            f"Точка: {point}\nСообщение: {user_data['text']}",
             parse_mode="Markdown"
         )
-
-        # Кнопка "Сделать новый заказ"
-        keyboard = [[InlineKeyboardButton("Сделать новый заказ", callback_data="NEW_ORDER")]]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-
-        await query.edit_message_text(
-            text=f"Спасибо! Ваш выбор: {point}. Продавец свяжется с Вами в ближайшее время в личных сообщениях ❤️.",
-            reply_markup=reply_markup
+        
+        # Кнопка для нового заказа
+        keyboard = types.InlineKeyboardMarkup()
+        keyboard.add(types.InlineKeyboardButton("Сделать новый заказ", callback_data="NEW_ORDER"))
+        
+        bot.edit_message_text(
+            f"Спасибо! Ваш выбор: {point}. Продавец свяжется с Вами в ближайшее время в личных сообщениях ❤️.",
+            call.message.chat.id,
+            call.message.message_id,
+            reply_markup=keyboard
         )
     else:
-        await query.edit_message_text(text="Ошибка. Попробуйте позже.")
+        bot.answer_callback_query(call.id, "Ошибка. Попробуйте позже.")
 
-# ====== ДОБАВЛЯЕМ ОБРАБОТЧИКИ В ПРИЛОЖЕНИЕ ======
-app.add_handler(CommandHandler("start", start))
-app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-app.add_handler(CallbackQueryHandler(button))
-
-# ====== FLASK ДЛЯ WEBHOOK ======
-@flask_app.route('/webhook', methods=['POST'])
-async def webhook():
-    """Обработчик вебхука от Telegram"""
+# ====== WEBHOOK ======
+@app.route('/webhook', methods=['POST'])
+def webhook():
     if request.headers.get('content-type') == 'application/json':
-        json_string = await request.get_data()
-        update = Update.de_json(json_string.decode('utf-8'), app.bot)
-        await app.process_update(update)
+        json_string = request.get_data().decode('utf-8')
+        update = telebot.types.Update.de_json(json_string)
+        bot.process_new_updates([update])
         return ''
     return 'Bad Request', 400
 
-@flask_app.route('/')
+@app.route('/')
 def index():
-    """Главная страница для проверки работы"""
-    return '''
-    <h1>🤖 Telegram Bot работает!</h1>
-    <p>Бот запущен и готов принимать заказы.</p>
-    <p>Откройте Telegram и найдите бота.</p>
-    '''
+    return '🤖 Бот работает! Откройте Telegram и найдите бота.'
 
-@flask_app.route('/set_webhook')
-async def set_webhook():
-    """Установка вебхука (вызывается автоматически)"""
-    # Удаляем старый вебхук
-    await app.bot.delete_webhook()
-    
-    # Получаем URL автоматически из переменных окружения Render
+@app.route('/set_webhook')
+def set_webhook():
+    bot.remove_webhook()
     service_name = os.environ.get('RENDER_SERVICE_NAME', 'dp-sbor-bot')
     webhook_url = f'https://{service_name}.onrender.com/webhook'
-    
-    # Устанавливаем новый вебхук
-    await app.bot.set_webhook(webhook_url)
-    
+    bot.set_webhook(url=webhook_url)
     return f'✅ Webhook установлен: {webhook_url}'
 
 # ====== ЗАПУСК ======
-if __name__ == "__main__":
-    import asyncio
+if __name__ == '__main__':
+    # Устанавливаем вебхук
+    service_name = os.environ.get('RENDER_SERVICE_NAME', 'dp-sbor-bot')
+    webhook_url = f'https://{service_name}.onrender.com/webhook'
+    bot.remove_webhook()
+    bot.set_webhook(url=webhook_url)
+    print(f"✅ Webhook установлен: {webhook_url}")
     
-    # Проверяем, работаем ли на Render
-    if os.environ.get('RENDER'):
-        print("🚀 Запуск на Render с вебхуком...")
-        # Запускаем Flask сервер
-        from waitress import serve
-        serve(flask_app, host='0.0.0.0', port=10000)
-    else:
-        print("💻 Локальный запуск с polling...")
-        # Локальный запуск для тестирования
-        app.run_polling()
+    # Запускаем Flask
+    app.run(host='0.0.0.0', port=10000, debug=False)
+
