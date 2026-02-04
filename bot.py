@@ -25,36 +25,6 @@ sellers_chat_id = {
     "Татьяна": 2051690432
 }
 
-# ====== KEEP-ALIVE СИСТЕМА ======
-if os.environ.get('RENDER'):
-    # Импортируем только если работаем на Render
-    import threading
-    import time
-    import urllib.request
-    
-    def keep_alive():
-        """Периодически пингует сервер, чтобы не засыпал"""
-        def ping():
-            # Правильный URL вашего бота
-            bot_url = "https://dp-sbor.onrender.com"
-            
-            while True:
-                try:
-                    # Пинг главной страницы бота
-                    urllib.request.urlopen(bot_url, timeout=10)
-                    print(f"[{time.strftime('%H:%M:%S')}] ✅ Keep-alive ping to {bot_url}")
-                except Exception as e:
-                    print(f"[{time.strftime('%H:%M:%S')}] ⚠️ Keep-alive error: {str(e)[:50]}")
-                time.sleep(240)  # Каждые 4 минуты
-        
-        # Запускаем в отдельном потоке
-        thread = threading.Thread(target=ping, daemon=True)
-        thread.start()
-        print(f"🚀 Keep-alive система запущена для {bot_url}")
-    
-    # Запускаем keep-alive
-    keep_alive()
-
 # ====== ОБРАБОТЧИКИ ======
 @bot.message_handler(commands=['start'])
 def send_welcome(message):
@@ -116,18 +86,17 @@ def handle_callback(call):
         buyer_name = user_info['name']
         buyer_id = user_info['user_id']
         
-        # ПРОСТОЕ сообщение продавцу БЕЗ КНОПКИ (для теста)
+        # Сообщение продавцу
         seller_message = (
             f"📦 НОВЫЙ ЗАКАЗ!\n\n"
             f"👤 Покупатель: {buyer_name}\n"
             f"📍 Точка: {address}\n"
             f"📝 Заказ: {user_info['text']}\n"
             f"🆔 ID: {buyer_id}\n\n"
-            f"💬 Ссылка для связи: tg://user?id={buyer_id}"
+            f"💬 Ссылка: tg://user?id={buyer_id}"
         )
         
         try:
-            # Отправляем продавцу ПРОСТОЕ сообщение
             bot.send_message(seller_id, seller_message)
             success = True
         except Exception as e:
@@ -154,8 +123,7 @@ def handle_callback(call):
             bot.answer_callback_query(call.id, "✅ Заказ отправлен!")
         else:
             bot.edit_message_text(
-                f"⚠️ Заказ принят, но продавец пока не получил уведомление.\n"
-                f"Мы уже работаем над этим.",
+                f"⚠️ Заказ принят, но продавец пока не получил уведомление.",
                 chat_id,
                 call.message.message_id,
                 reply_markup=user_keyboard
