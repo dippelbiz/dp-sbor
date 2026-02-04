@@ -38,16 +38,11 @@ def send_welcome(message):
 
 @bot.message_handler(func=lambda message: True, content_types=['text'])
 def handle_text(message):
-    # Сохраняем данные с проверкой на None
-    user_name = message.from_user.first_name or "Покупатель"
-    user_id = message.from_user.id
-    username = message.from_user.username or ""  # Если username нет, будет пустая строка
-    
+    # Сохраняем данные
     user_data[message.chat.id] = {
         'text': message.text,
-        'name': user_name,
-        'user_id': user_id,
-        'username': username  # Может быть пустой строкой
+        'name': message.from_user.first_name or "Покупатель",
+        'user_id': message.from_user.id
     }
     
     # Создаем кнопки с адресами
@@ -60,7 +55,7 @@ def handle_text(message):
     
     bot.send_message(
         message.chat.id, 
-        "✅ Сообщение получено!\n\nВыберите удобный адрес:",
+        "✅ Сообщение получено! Выберите удобный адрес:",
         reply_markup=keyboard
     )
 
@@ -91,30 +86,19 @@ def handle_callback(call):
         buyer_name = user_info['name']
         buyer_id = user_info['user_id']
         
-        # Сообщение продавцу с КНОПКОЙ
+        # ПРОСТОЕ сообщение продавцу БЕЗ КНОПКИ (для теста)
         seller_message = (
-            f"📦 *НОВЫЙ ЗАКАЗ!*\n\n"
-            f"👤 *Покупатель:* {buyer_name}\n"
-            f"📍 *Точка:* {address}\n"
-            f"📝 *Заказ:* {user_info['text']}\n"
-            f"🆔 *ID:* `{buyer_id}`"
+            f"📦 НОВЫЙ ЗАКАЗ!\n\n"
+            f"👤 Покупатель: {buyer_name}\n"
+            f"📍 Точка: {address}\n"
+            f"📝 Заказ: {user_info['text']}\n"
+            f"🆔 ID: {buyer_id}\n\n"
+            f"💬 Ссылка для связи: tg://user?id={buyer_id}"
         )
         
-        # СОЗДАЕМ КНОПКУ ДЛЯ СВЯЗИ (работает даже без username)
-        seller_keyboard = telebot.types.InlineKeyboardMarkup()
-        seller_keyboard.add(telebot.types.InlineKeyboardButton(
-            text=f"💬 Написать {buyer_name}",
-            url=f"tg://user?id={buyer_id}"  # Эта ссылка работает по ID, не нужен username
-        ))
-        
-        # Отправляем продавцу
         try:
-            bot.send_message(
-                seller_id,
-                seller_message,
-                parse_mode="Markdown",
-                reply_markup=seller_keyboard
-            )
+            # Отправляем продавцу ПРОСТОЕ сообщение
+            bot.send_message(seller_id, seller_message)
             success = True
         except Exception as e:
             print(f"Ошибка отправки продавцу: {e}")
@@ -129,32 +113,26 @@ def handle_callback(call):
         
         if success:
             bot.edit_message_text(
-                f"✅ *Заказ принят!*\n\n"
-                f"📍 *Адрес:* {address}\n"
-                f"📝 *Ваш заказ:* {user_info['text']}\n\n"
-                f"Продавец *{seller_name}* свяжется с Вами в ближайшее время.",
+                f"✅ Заказ принят!\n\n"
+                f"📍 Адрес: {address}\n"
+                f"📝 Ваш заказ: {user_info['text']}\n\n"
+                f"Продавец {seller_name} свяжется с Вами.",
                 chat_id,
                 call.message.message_id,
-                parse_mode="Markdown",
                 reply_markup=user_keyboard
             )
-            bot.answer_callback_query(call.id, "✅ Заказ отправлен продавцу!")
+            bot.answer_callback_query(call.id, "✅ Заказ отправлен!")
         else:
             bot.edit_message_text(
-                f"⚠️ *Заказ принят, но возникла задержка*\n\n"
-                f"Продавец получит уведомление в ближайшее время.",
+                f"⚠️ Заказ принят, но продавец пока не получил уведомление.\n"
+                f"Мы уже работаем над этим.",
                 chat_id,
                 call.message.message_id,
                 reply_markup=user_keyboard
             )
-            bot.answer_callback_query(call.id, "⚠️ Заказ принят, но есть задержка")
+            bot.answer_callback_query(call.id, "⚠️ Задержка с уведомлением")
     else:
         bot.answer_callback_query(call.id, "❌ Ошибка: точка временно недоступна")
-        bot.edit_message_text(
-            "❌ Выбранная точка временно недоступна.\nПожалуйста, выберите другую.",
-            chat_id,
-            call.message.message_id
-        )
 
 # ====== WEBHOOK ======
 @app.route('/webhook', methods=['POST'])
