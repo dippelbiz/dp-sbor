@@ -7,6 +7,9 @@ TOKEN = os.environ.get('BOT_TOKEN', "8513392038:AAEupfJ198a3AtNinoAsA2h2mmtFIDLO
 bot = telebot.TeleBot(TOKEN)
 app = Flask(__name__)
 
+# Хранилище данных пользователей (в памяти)
+user_data = {}
+
 # Список точек и продавцов
 pickup_points = {
     "ул. Галащука 15": "Александр",
@@ -22,9 +25,9 @@ sellers_chat_id = {
     "Татьяна": 2051690432
 }
 
-# ====== ОБРАБОТЧИКИ ======
+# ====== ОБРАБОТЧИКИ КОМАНД ======
 @bot.message_handler(commands=['start'])
-def start(message):
+def send_welcome(message):
     bot.reply_to(message,
         " 🟢*Пошаговая инструкция*🟢\n\n"
         "▪️ Напишите, что Вы хотите заказать\n"
@@ -34,31 +37,44 @@ def start(message):
         parse_mode="Markdown"
     )
 
-@bot.message_handler(func=lambda message: True)
-def handle_message(message):
-    from telebot import types
-    
-    # Сохраняем данные
-    bot.user_data = getattr(bot, 'user_data', {})
-    bot.user_data[message.chat.id] = {
+# Обработка текстовых сообщений
+@bot.message_handler(func=lambda message: True, content_types=['text'])
+def handle_text(message):
+    # Сохраняем данные пользователя
+    user_data[message.chat.id] = {
         'text': message.text,
         'name': message.from_user.first_name,
-        'id': message.from_user.id
+        'user_id': message.from_user.id
     }
     
-    # Создаем клавиатуру с адресами
-    keyboard = types.InlineKeyboardMarkup()
-    for point in pickup_points.keys():
-        keyboard.add(types.InlineKeyboardButton(point, callback_data=point))
+    # Создаем клавиатуру с кнопками адресов
+    keyboard = telebot.types.InlineKeyboardMarkup()
+    for address in pickup_points.keys():
+        keyboard.add(telebot.types.InlineKeyboardButton(
+            text=address, 
+            callback_data=address
+        ))
     
-    bot.reply_to(message, "Выберите удобный адрес:", reply_markup=keyboard)
+    bot.send_message(
+        message.chat.id, 
+        "Выберите удобный адрес:",
+        reply_markup=keyboard
+    )
 
+# Обработка нажатий на кнопки
 @bot.callback_query_handler(func=lambda call: True)
 def handle_callback(call):
+    chat_id = call.message.chat.id
+    
     if call.data == "NEW_ORDER":
         bot.answer_callback_query(call.id)
-        bot.edit_message_text("Сделать новый заказ.", call.message.chat.id, call.message.message_id)
-        bot.send_message(call.message.chat.id,
+        bot.edit_message_text(
+            "Сделать новый заказ.", 
+            chat_id, 
+            call.message.message_id
+        )
+        bot.send_message(
+            chat_id,
             " 🟢*Пошаговая инструкция*🟢\n\n"
             "▪️ Напишите, что Вы хотите заказать\n"
             "✉️ *Отправьте сообщение* ✉️\n\n"
@@ -68,34 +84,48 @@ def handle_callback(call):
         )
         return
     
-    point = call.data
-    user_data = getattr(bot, 'user_data', {}).get(call.message.chat.id, {})
+    # Обработка выбора адреса
+    address = call.data
+    user_info = user_data.get(chat_id)
     
-    seller_name = pickup_points.get(point)
+    if not user_info:
+        bot.answer_callback_query(call.id, "Ошибка: данные не найдены")
+        return
+    
+    seller_name = pickup_points.get(address)
     seller_id = sellers_chat_id.get(seller_name)
     
-    if seller_id and user_data:
+    if seller_id:
+        # Отправляем уведомление продавцу
         bot.send_message(
             seller_id,
-            f"Новый заказ!\nПокупатель: {user_data['name']} [Написать](tg://user?id={user_data['id']})\n"
-            f"Точка: {point}\nСообщение: {user_data['text']}",
+            f"📦 *Новый зарок!*\n\n"
+            f"👤 Покупатель: {user_info['name']}\n"
+            f"🔗 [Написать](tg://user?id={user_info['user_id']})\n"
+            f"📍 Точка: {address}\n"
+            f"📝 Сообщение: {user_info['text']}",
             parse_mode="Markdown"
         )
         
-        # Кнопка для нового заказа
-        keyboard = types.InlineKeyboardMarkup()
-        keyboard.add(types.InlineKeyboardButton("Сделать новый заказ", callback_data="NEW_ORDER"))
+        # Подтверждение пользователю
+        keyboard = telebot.types.InlineKeyboardMarkup()
+        keyboard.add(telebot.types.InlineKeyboardButton(
+            "🔄 Сделать новый заказ", 
+            callback_data="NEW_ORDER"
+        ))
         
         bot.edit_message_text(
-            f"Спасибо! Ваш выбор: {point}. Продавец свяжется с Вами в ближайшее время в личных сообщениях ❤️.",
-            call.message.chat.id,
+            f"✅ Спасибо! Ваш выбор: {address}\n"
+            f"📞 Продавец свяжется с Вами в ближайшее время в личных сообщениях ❤️.",
+            chat_id,
             call.message.message_id,
             reply_markup=keyboard
         )
+        bot.answer_callback_query(call.id)
     else:
-        bot.answer_callback_query(call.id, "Ошибка. Попробуйте позже.")
+        bot.answer_callback_query(call.id, "❌ Ошибка. Попробуйте позже.")
 
-# ====== WEBHOOK ======
+# ====== WEBHOOK ДЛЯ RENDER ======
 @app.route('/webhook', methods=['POST'])
 def webhook():
     if request.headers.get('content-type') == 'application/json':
@@ -107,25 +137,39 @@ def webhook():
 
 @app.route('/')
 def index():
-    return '🤖 Бот работает! Откройте Telegram и найдите бота.'
+    return '''
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>🤖 Telegram Bot</title>
+        <style>
+            body { font-family: Arial; text-align: center; padding: 50px; }
+            h1 { color: #0088cc; }
+        </style>
+    </head>
+    <body>
+        <h1>✅ Telegram Bot работает!</h1>
+        <p>Бот запущен и готов принимать заказы.</p>
+        <p>Откройте Telegram и найдите своего бота.</p>
+    </body>
+    </html>
+    '''
 
-@app.route('/set_webhook')
-def set_webhook():
-    bot.remove_webhook()
-    service_name = os.environ.get('RENDER_SERVICE_NAME', 'dp-sbor-bot')
-    webhook_url = f'https://{service_name}.onrender.com/webhook'
-    bot.set_webhook(url=webhook_url)
-    return f'✅ Webhook установлен: {webhook_url}'
-
-# ====== ЗАПУСК ======
+# ====== ЗАПУСК СЕРВЕРА ======
 if __name__ == '__main__':
     # Устанавливаем вебхук
-    service_name = os.environ.get('RENDER_SERVICE_NAME', 'dp-sbor-bot')
-    webhook_url = f'https://{service_name}.onrender.com/webhook'
-    bot.remove_webhook()
-    bot.set_webhook(url=webhook_url)
-    print(f"✅ Webhook установлен: {webhook_url}")
+    try:
+        bot.remove_webhook()
+        
+        # Получаем URL из переменных окружения Render
+        service_name = os.environ.get('RENDER_SERVICE_NAME', 'dp-sbor-bot')
+        webhook_url = f'https://{service_name}.onrender.com/webhook'
+        
+        bot.set_webhook(url=webhook_url)
+        print(f"✅ Вебхук установлен: {webhook_url}")
+    except Exception as e:
+        print(f"⚠️ Ошибка при установке вебхука: {e}")
     
-    # Запускаем Flask
-    app.run(host='0.0.0.0', port=10000, debug=False)
-
+    # Запускаем Flask сервер
+    port = int(os.environ.get('PORT', 10000))
+    app.run(host='0.0.0.0', port=port, debug=False)
