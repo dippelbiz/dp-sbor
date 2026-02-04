@@ -38,11 +38,16 @@ def send_welcome(message):
 
 @bot.message_handler(func=lambda message: True, content_types=['text'])
 def handle_text(message):
-    # Сохраняем данные
+    # Сохраняем данные с проверкой на None
+    user_name = message.from_user.first_name or "Покупатель"
+    user_id = message.from_user.id
+    username = message.from_user.username or ""  # Если username нет, будет пустая строка
+    
     user_data[message.chat.id] = {
         'text': message.text,
-        'name': message.from_user.first_name,
-        'user_id': message.from_user.id
+        'name': user_name,
+        'user_id': user_id,
+        'username': username  # Может быть пустой строкой
     }
     
     # Создаем кнопки с адресами
@@ -55,7 +60,7 @@ def handle_text(message):
     
     bot.send_message(
         message.chat.id, 
-        "Выберите удобный адрес:",
+        "✅ Сообщение получено!\n\nВыберите удобный адрес:",
         reply_markup=keyboard
     )
 
@@ -65,7 +70,7 @@ def handle_callback(call):
     
     if call.data == "NEW_ORDER":
         bot.answer_callback_query(call.id)
-        bot.edit_message_text("Новый заказ", chat_id, call.message.message_id)
+        bot.edit_message_text("🔄 Начинаем новый заказ", chat_id, call.message.message_id)
         bot.send_message(chat_id, "Напишите что хотите заказать:")
         return
     
@@ -74,35 +79,46 @@ def handle_callback(call):
     user_info = user_data.get(chat_id)
     
     if not user_info:
-        bot.answer_callback_query(call.id, "Ошибка: данные не найдены")
+        bot.answer_callback_query(call.id, "❌ Ошибка: начните заказ заново")
+        bot.send_message(chat_id, "Пожалуйста, напишите что хотите заказать:")
         return
     
     seller_name = pickup_points.get(address)
     seller_id = sellers_chat_id.get(seller_name)
     
     if seller_id:
+        # Формируем информацию о покупателе
+        buyer_name = user_info['name']
+        buyer_id = user_info['user_id']
+        
         # Сообщение продавцу с КНОПКОЙ
         seller_message = (
-            f"📦 *Новый заказ!*\n\n"
-            f"👤 Покупатель: {user_info['name']}\n"
-            f"📍 Точка: {address}\n"
-            f"📝 Заказ: {user_info['text']}"
+            f"📦 *НОВЫЙ ЗАКАЗ!*\n\n"
+            f"👤 *Покупатель:* {buyer_name}\n"
+            f"📍 *Точка:* {address}\n"
+            f"📝 *Заказ:* {user_info['text']}\n"
+            f"🆔 *ID:* `{buyer_id}`"
         )
         
-        # СОЗДАЕМ КНОПКУ ДЛЯ СВЯЗИ
+        # СОЗДАЕМ КНОПКУ ДЛЯ СВЯЗИ (работает даже без username)
         seller_keyboard = telebot.types.InlineKeyboardMarkup()
         seller_keyboard.add(telebot.types.InlineKeyboardButton(
-            text=f"💬 Написать {user_info['name']}",
-            url=f"tg://user?id={user_info['user_id']}"
+            text=f"💬 Написать {buyer_name}",
+            url=f"tg://user?id={buyer_id}"  # Эта ссылка работает по ID, не нужен username
         ))
         
         # Отправляем продавцу
-        bot.send_message(
-            seller_id,
-            seller_message,
-            parse_mode="Markdown",
-            reply_markup=seller_keyboard
-        )
+        try:
+            bot.send_message(
+                seller_id,
+                seller_message,
+                parse_mode="Markdown",
+                reply_markup=seller_keyboard
+            )
+            success = True
+        except Exception as e:
+            print(f"Ошибка отправки продавцу: {e}")
+            success = False
         
         # Ответ покупателю
         user_keyboard = telebot.types.InlineKeyboardMarkup()
@@ -111,16 +127,34 @@ def handle_callback(call):
             callback_data="NEW_ORDER"
         ))
         
-        bot.edit_message_text(
-            f"✅ Спасибо! Ваш выбор: {address}\n"
-            f"Продавец свяжется с Вами в ближайшее время.",
-            chat_id,
-            call.message.message_id,
-            reply_markup=user_keyboard
-        )
-        bot.answer_callback_query(call.id, "✅ Заказ отправлен!")
+        if success:
+            bot.edit_message_text(
+                f"✅ *Заказ принят!*\n\n"
+                f"📍 *Адрес:* {address}\n"
+                f"📝 *Ваш заказ:* {user_info['text']}\n\n"
+                f"Продавец *{seller_name}* свяжется с Вами в ближайшее время.",
+                chat_id,
+                call.message.message_id,
+                parse_mode="Markdown",
+                reply_markup=user_keyboard
+            )
+            bot.answer_callback_query(call.id, "✅ Заказ отправлен продавцу!")
+        else:
+            bot.edit_message_text(
+                f"⚠️ *Заказ принят, но возникла задержка*\n\n"
+                f"Продавец получит уведомление в ближайшее время.",
+                chat_id,
+                call.message.message_id,
+                reply_markup=user_keyboard
+            )
+            bot.answer_callback_query(call.id, "⚠️ Заказ принят, но есть задержка")
     else:
-        bot.answer_callback_query(call.id, "❌ Ошибка")
+        bot.answer_callback_query(call.id, "❌ Ошибка: точка временно недоступна")
+        bot.edit_message_text(
+            "❌ Выбранная точка временно недоступна.\nПожалуйста, выберите другую.",
+            chat_id,
+            call.message.message_id
+        )
 
 # ====== WEBHOOK ======
 @app.route('/webhook', methods=['POST'])
