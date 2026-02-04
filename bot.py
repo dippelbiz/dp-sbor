@@ -25,6 +25,33 @@ sellers_chat_id = {
     "Татьяна": 2051690432
 }
 
+# ====== KEEP-ALIVE СИСТЕМА ======
+if os.environ.get('RENDER'):
+    # Импортируем только если работаем на Render
+    import threading
+    import time
+    import urllib.request
+    
+    def keep_alive():
+        """Периодически пингует сервер, чтобы не засыпал"""
+        def ping():
+            while True:
+                try:
+                    # Пинг главной страницы бота
+                    urllib.request.urlopen("https://dp-sbor-bot.onrender.com", timeout=10)
+                    print(f"[{time.strftime('%H:%M:%S')}] ✅ Keep-alive ping")
+                except Exception as e:
+                    print(f"[{time.strftime('%H:%M:%S')}] ⚠️ Keep-alive error: {str(e)[:50]}")
+                time.sleep(240)  # Каждые 4 минуты
+        
+        # Запускаем в отдельном потоке
+        thread = threading.Thread(target=ping, daemon=True)
+        thread.start()
+        print("🚀 Keep-alive система запущена")
+    
+    # Запускаем keep-alive
+    keep_alive()
+
 # ====== ОБРАБОТЧИКИ ======
 @bot.message_handler(commands=['start'])
 def send_welcome(message):
