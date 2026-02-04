@@ -35,11 +35,14 @@ if os.environ.get('RENDER'):
     def keep_alive():
         """Периодически пингует сервер, чтобы не засыпал"""
         def ping():
+            # Правильный URL вашего бота
+            bot_url = "https://dp-sbor.onrender.com"
+            
             while True:
                 try:
                     # Пинг главной страницы бота
-                    urllib.request.urlopen("https://dp-sbor-bot.onrender.com", timeout=10)
-                    print(f"[{time.strftime('%H:%M:%S')}] ✅ Keep-alive ping")
+                    urllib.request.urlopen(bot_url, timeout=10)
+                    print(f"[{time.strftime('%H:%M:%S')}] ✅ Keep-alive ping to {bot_url}")
                 except Exception as e:
                     print(f"[{time.strftime('%H:%M:%S')}] ⚠️ Keep-alive error: {str(e)[:50]}")
                 time.sleep(240)  # Каждые 4 минуты
@@ -47,7 +50,7 @@ if os.environ.get('RENDER'):
         # Запускаем в отдельном потоке
         thread = threading.Thread(target=ping, daemon=True)
         thread.start()
-        print("🚀 Keep-alive система запущена")
+        print(f"🚀 Keep-alive система запущена для {bot_url}")
     
     # Запускаем keep-alive
     keep_alive()
@@ -180,7 +183,7 @@ if __name__ == '__main__':
     # Устанавливаем вебхук
     bot.remove_webhook()
     
-    service_name = os.environ.get('RENDER_SERVICE_NAME', 'dp-sbor-bot')
+    service_name = os.environ.get('RENDER_SERVICE_NAME', 'dp-sbor')
     webhook_url = f'https://{service_name}.onrender.com/webhook'
     
     bot.set_webhook(url=webhook_url)
