@@ -43,8 +43,9 @@ def handle_text(message):
     # Сохраняем данные пользователя
     user_data[message.chat.id] = {
         'text': message.text,
-        'name': message.from_user.first_name,
-        'user_id': message.from_user.id
+        'name': message.from_user.first_name or "Покупатель",
+        'user_id': message.from_user.id,
+        'username': message.from_user.username or ""
     }
     
     # Создаем клавиатуру с кнопками адресов
@@ -57,7 +58,7 @@ def handle_text(message):
     
     bot.send_message(
         message.chat.id, 
-        "Выберите удобный адрес:",
+        "✅ Сообщение получено!\n\nВыберите удобный адрес для получения заказа:",
         reply_markup=keyboard
     )
 
@@ -69,7 +70,7 @@ def handle_callback(call):
     if call.data == "NEW_ORDER":
         bot.answer_callback_query(call.id)
         bot.edit_message_text(
-            "Сделать новый заказ.", 
+            "🔄 Начинаем новый заказ", 
             chat_id, 
             call.message.message_id
         )
@@ -89,45 +90,140 @@ def handle_callback(call):
     user_info = user_data.get(chat_id)
     
     if not user_info:
-        bot.answer_callback_query(call.id, "Ошибка: данные не найдены")
+        bot.answer_callback_query(call.id, "❌ Ошибка: данные не найдены. Начните заказ заново.")
         return
     
     seller_name = pickup_points.get(address)
     seller_id = sellers_chat_id.get(seller_name)
     
     if seller_id:
-        # Отправляем уведомление продавцу
-        bot.send_message(
-            seller_id,
-            f"📦 *Новый зарок!*\n\n"
-            f"👤 Покупатель: {user_info['name']}\n"
-            f"🔗 [Написать](tg://user?id={user_info['user_id']})\n"
-            f"📍 Точка: {address}\n"
-            f"📝 Сообщение: {user_info['text']}",
-            parse_mode="Markdown"
+        # Формируем информацию о покупателе
+        buyer_info = f"{user_info['name']}"
+        if user_info.get('username'):
+            buyer_info += f" (@{user_info['username']})"
+        
+        # Создаем сообщение для продавца
+        seller_message = (
+            f"🛒 *НОВЫЙ ЗАКАЗ!*\n\n"
+            f"👤 *Покупатель:* {buyer_info}\n"
+            f"📞 *ID:* `{user_info['user_id']}`\n"
+            f"📍 *Точка выдачи:* {address}\n"
+            f"📝 *Заказ:* {user_info['text']}\n\n"
+            f"⏰ *Время:* {call.message.date.strftime('%H:%M %d.%m.%Y')}"
         )
+        
+        # Создаем кнопки для продавца
+        seller_keyboard = telebot.types.InlineKeyboardMarkup(row_width=1)
+        
+        # Кнопка для связи с покупателем
+        seller_keyboard.add(
+            telebot.types.InlineKeyboardButton(
+                text=f"💬 Написать {user_info['name']}",
+                url=f"tg://user?id={user_info['user_id']}"
+            )
+        )
+        
+        # Дополнительная кнопка с копированием ID (если нужно)
+        seller_keyboard.add(
+            telebot.types.InlineKeyboardButton(
+                text="📋 Скопировать ID покупателя",
+                callback_data=f"copy_{user_info['user_id']}"
+            )
+        )
+        
+        # Отправляем уведомление продавцу
+        try:
+            bot.send_message(
+                seller_id,
+                seller_message,
+                parse_mode="Markdown",
+                reply_markup=seller_keyboard
+            )
+            seller_notified = True
+        except Exception as e:
+            print(f"Ошибка отправки продавцу {seller_name}: {e}")
+            seller_notified = False
         
         # Подтверждение пользователю
-        keyboard = telebot.types.InlineKeyboardMarkup()
-        keyboard.add(telebot.types.InlineKeyboardButton(
-            "🔄 Сделать новый заказ", 
-            callback_data="NEW_ORDER"
-        ))
+        user_keyboard = telebot.types.InlineKeyboardMarkup()
+        user_keyboard.add(
+            telebot.types.InlineKeyboardButton(
+                "🔄 Сделать новый заказ", 
+                callback_data="NEW_ORDER"
+            )
+        )
+        
+        if seller_notified:
+            confirmation_text = (
+                f"✅ *Заказ принят!*\n\n"
+                f"📍 *Ваш выбор:* {address}\n"
+                f"📝 *Ваш заказ:* {user_info['text']}\n\n"
+                f"👨‍💼 *Продавец {seller_name}* свяжется с Вами в ближайшее время в личных сообщениях.\n\n"
+                f"❤️ Спасибо за заказ!"
+            )
+            bot.answer_callback_query(call.id, "✅ Заказ отправлен продавцу!")
+        else:
+            confirmation_text = (
+                f"⚠️ *Заказ принят, но возникла небольшая задержка*\n\n"
+                f"📍 *Ваш выбор:* {address}\n"
+                f"📝 *Ваш заказ:* {user_info['text']}\n\n"
+                f"Продавец получит уведомление в ближайшее время.\n"
+                f"Приносим извинения за возможную задержку."
+            )
+            bot.answer_callback_query(call.id, "⚠️ Заказ принят, но есть задержка уведомления")
         
         bot.edit_message_text(
-            f"✅ Спасибо! Ваш выбор: {address}\n"
-            f"📞 Продавец свяжется с Вами в ближайшее время в личных сообщениях ❤️.",
+            confirmation_text,
             chat_id,
             call.message.message_id,
-            reply_markup=keyboard
+            parse_mode="Markdown",
+            reply_markup=user_keyboard
         )
-        bot.answer_callback_query(call.id)
+        
     else:
-        bot.answer_callback_query(call.id, "❌ Ошибка. Попробуйте позже.")
+        bot.answer_callback_query(call.id, "❌ Ошибка: продавец не найден")
+        bot.edit_message_text(
+            "❌ К сожалению, выбранная точка временно недоступна.\n\n"
+            "Пожалуйста, выберите другую точку или попробуйте позже.",
+            chat_id,
+            call.message.message_id
+        )
+
+# Обработка кнопки копирования ID (для продавца)
+@bot.callback_query_handler(func=lambda call: call.data.startswith('copy_'))
+def handle_copy_id(call):
+    user_id = call.data.replace('copy_', '')
+    bot.answer_callback_query(
+        call.id,
+        f"ID скопирован: {user_id}",
+        show_alert=True
+    )
 
 # ====== WEBHOOK ДЛЯ RENDER ======
-@app.route('/webhook', methods=['POST'])
+@app.route('/webhook', methods=['GET', 'POST'])
 def webhook():
+    if request.method == 'GET':
+        return '''
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <title>🤖 Вебхук бота</title>
+            <style>
+                body { font-family: Arial; text-align: center; padding: 50px; }
+                .success { color: green; }
+                .info { color: blue; }
+            </style>
+        </head>
+        <body>
+            <h1 class="success">✅ Вебхук активен</h1>
+            <p class="info">Бот работает и готов принимать заказы</p>
+            <p>Telegram: @dp_sbor_bot</p>
+            <p><a href="/">На главную</a></p>
+        </body>
+        </html>
+        '''
+    
+    # Обработка POST-запросов от Telegram
     if request.headers.get('content-type') == 'application/json':
         json_string = request.get_data().decode('utf-8')
         update = telebot.types.Update.de_json(json_string)
@@ -141,16 +237,110 @@ def index():
     <!DOCTYPE html>
     <html>
     <head>
-        <title>🤖 Telegram Bot</title>
+        <title>🤖 Бот приема заказов</title>
+        <meta charset="utf-8">
         <style>
-            body { font-family: Arial; text-align: center; padding: 50px; }
-            h1 { color: #0088cc; }
+            body {
+                font-family: 'Arial', sans-serif;
+                text-align: center;
+                padding: 50px;
+                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                color: white;
+                min-height: 100vh;
+                display: flex;
+                flex-direction: column;
+                justify-content: center;
+                align-items: center;
+            }
+            .container {
+                background: rgba(255, 255, 255, 0.1);
+                backdrop-filter: blur(10px);
+                padding: 40px;
+                border-radius: 20px;
+                box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+                max-width: 600px;
+                width: 90%;
+            }
+            h1 {
+                font-size: 2.5em;
+                margin-bottom: 20px;
+                text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.3);
+            }
+            .status {
+                background: rgba(76, 175, 80, 0.2);
+                border: 2px solid #4CAF50;
+                padding: 15px;
+                border-radius: 10px;
+                margin: 20px 0;
+                font-size: 1.2em;
+            }
+            .features {
+                text-align: left;
+                margin: 30px 0;
+                background: rgba(255, 255, 255, 0.1);
+                padding: 20px;
+                border-radius: 10px;
+            }
+            .features li {
+                margin: 10px 0;
+                padding-left: 10px;
+            }
+            .button {
+                display: inline-block;
+                background: #4CAF50;
+                color: white;
+                padding: 15px 30px;
+                text-decoration: none;
+                border-radius: 50px;
+                font-weight: bold;
+                margin-top: 20px;
+                transition: all 0.3s;
+                border: none;
+                cursor: pointer;
+                font-size: 1.1em;
+            }
+            .button:hover {
+                background: #45a049;
+                transform: translateY(-2px);
+                box-shadow: 0 5px 15px rgba(0, 0, 0, 0.3);
+            }
+            .telegram-icon {
+                font-size: 3em;
+                margin-bottom: 20px;
+            }
         </style>
     </head>
     <body>
-        <h1>✅ Telegram Bot работает!</h1>
-        <p>Бот запущен и готов принимать заказы.</p>
-        <p>Откройте Telegram и найдите своего бота.</p>
+        <div class="container">
+            <div class="telegram-icon">🤖</div>
+            <h1>Бот приема заказов</h1>
+            
+            <div class="status">
+                ✅ <strong>Статус:</strong> Активен и работает 24/7
+            </div>
+            
+            <div class="features">
+                <h3>📋 Возможности бота:</h3>
+                <ul>
+                    <li>✅ Прием заказов от покупателей</li>
+                    <li>📍 Выбор точек самовывоза</li>
+                    <li>👨‍💼 Автоматическое уведомление продавцов</li>
+                    <li>💬 Прямая связь продавец-покупатель</li>
+                    <li>🔄 Многократные заказы</li>
+                    <li>☁️ Работает в облаке 24/7</li>
+                </ul>
+            </div>
+            
+            <p>Для использования откройте Telegram и найдите бота</p>
+            
+            <a href="https://t.me/dp_sbor_bot" class="button" target="_blank">
+                📱 Открыть в Telegram
+            </a>
+            
+            <p style="margin-top: 30px; font-size: 0.9em; opacity: 0.8;">
+                Бот работает на Render.com | Обновляется автоматически
+            </p>
+        </div>
     </body>
     </html>
     '''
@@ -167,6 +357,8 @@ if __name__ == '__main__':
         
         bot.set_webhook(url=webhook_url)
         print(f"✅ Вебхук установлен: {webhook_url}")
+        print(f"🤖 Бот запущен и готов к работе!")
+        print(f"🔗 Ссылка на бота: https://t.me/dp_sbor_bot")
     except Exception as e:
         print(f"⚠️ Ошибка при установке вебхука: {e}")
     
