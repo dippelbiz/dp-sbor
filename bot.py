@@ -116,9 +116,9 @@ def handle_callback(call):
                 f"📍 Адрес: {address}\n"
                 f"📝 Ваш заказ: {user_info['text']}\n\n"
                 f"*Менеджер свяжется с Вами в ближайшее время*.",
-                parse_mode="Markdown",
                 chat_id,
                 call.message.message_id,
+                parse_mode="Markdown",
                 reply_markup=user_keyboard
             )
             bot.answer_callback_query(call.id, "✅ Заказ отправлен!")
@@ -161,4 +161,3 @@ if __name__ == '__main__':
     # Запускаем сервер
     port = int(os.environ.get('PORT', 10000))
     app.run(host='0.0.0.0', port=port, debug=False)
-
