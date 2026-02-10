@@ -113,7 +113,7 @@ def send_about(message):
         "*Наш канал: t.me/dp_sbor *"
     )
     bot.send_message(message.chat.id, about_text, parse_mode="Markdown")
-    show_instruction_with_keyboard(message.chat.id)
+  
 
 @bot.message_handler(func=lambda message: True, content_types=['text'])
 def handle_text(message):
@@ -245,4 +245,5 @@ if __name__ == '__main__':
     # Запускаем сервер
     port = int(os.environ.get('PORT', 10000))
     app.run(host='0.0.0.0', port=port, debug=False)
+
 
