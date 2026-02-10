@@ -3,7 +3,7 @@ import telebot
 from flask import Flask, request
 
 # ====== НАСТРОЙКИ ======
-TOKEN = os.environ.get('BOT_TOKEN', "8474871816:AAET_cPyUkzKtmNe3aKvi0HULmPH9YD-wlg")
+TOKEN = os.environ.get('BOT_TOKEN')
 bot = telebot.TeleBot(TOKEN)
 app = Flask(__name__)
 
@@ -209,4 +209,5 @@ if __name__ == '__main__':
     # Запускаем сервер
     port = int(os.environ.get('PORT', 10000))
     app.run(host='0.0.0.0', port=port, debug=False)
+
 
