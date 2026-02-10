@@ -4,13 +4,17 @@ from flask import Flask, request
 
 # ====== НАСТРОЙКИ ======
 TOKEN = os.environ.get('BOT_TOKEN')
+if not TOKEN:
+    print("❌ ОШИБКА: BOT_TOKEN не установлен!")
+    exit(1)
+
 bot = telebot.TeleBot(TOKEN)
 app = Flask(__name__)
 
 # Хранилище данных пользователей
 user_data = {}
 
-# Список точек и продавцов
+# Список точек
 pickup_points = {
     "ул. Галущака 15": "Александр",
     "ул. Беловежская 4/1": "Юлия", 
@@ -19,13 +23,44 @@ pickup_points = {
     "ул. Бетонная 14/1": "Рабочий"
 }
 
-sellers_chat_id = {
-    "Александр": ('Seller_Aleksandr'),
-    "Юлия": ('Seller_Yulia'),
-    "Евгений": ('Seller_Evgeniy'),
-    "Татьяна": ('Seller_Tatiana'),
-    "Рабочий": ('Seller_Rabochiy')
-}
+# ФУНКЦИЯ ДЛЯ ПОЛУЧЕНИЯ ID ПРОДАВЦОВ
+def get_seller_id(seller_name):
+    """Получение ID продавца из переменных окружения"""
+    env_vars = {
+        "Александр": "Seller_Aleksandr",
+        "Юлия": "Seller_Yulia",
+        "Евгений": "Seller_Evgeniy",
+        "Татьяна": "Seller_Tatiana",
+        "Рабочий": "Seller_Rabochiy"
+    }
+    
+    env_var_name = env_vars.get(seller_name)
+    if not env_var_name:
+        print(f"❌ Неизвестный продавец: {seller_name}")
+        return None
+    
+    seller_id_str = os.environ.get(env_var_name)
+    if not seller_id_str:
+        print(f"⚠️ Внимание: ID продавца {seller_name} не установлен!")
+        print(f"   Установите переменную {env_var_name} в настройках Render")
+        return None
+    
+    try:
+        return int(seller_id_str)
+    except ValueError:
+        print(f"❌ Ошибка: ID продавца {seller_name} должен быть числом, а не '{seller_id_str}'")
+        return None
+
+# Проверяем при запуске
+print("=" * 50)
+print("🔍 Проверка настроек продавцов:")
+for seller_name in ["Александр", "Юлия", "Евгений", "Татьяна", "Рабочий"]:
+    seller_id = get_seller_id(seller_name)
+    if seller_id:
+        print(f"✅ {seller_name}: ID установлен")
+    else:
+        print(f"❌ {seller_name}: ID НЕ установлен")
+print("=" * 50)
 
 def show_instruction_with_keyboard(chat_id):
     """Показать инструкцию с клавиатурой"""
@@ -64,7 +99,7 @@ def send_catalog(message):
         "*Для заказа напишите что Вам нужно*"
     )
     bot.send_message(message.chat.id, catalog_text, parse_mode="Markdown")
-    show_instruction_with_keyboard(message.chat.id)  # Показываем инструкцию после каталога
+    show_instruction_with_keyboard(message.chat.id)
 
 @bot.message_handler(func=lambda message: message.text == 'О нас')
 def send_about(message):
@@ -78,7 +113,7 @@ def send_about(message):
         "*Наш канал: t.me/dp_sbor *"
     )
     bot.send_message(message.chat.id, about_text, parse_mode="Markdown")
-    show_instruction_with_keyboard(message.chat.id)  # Показываем инструкцию после информации "О нас"
+    show_instruction_with_keyboard(message.chat.id)
 
 @bot.message_handler(func=lambda message: True, content_types=['text'])
 def handle_text(message):
@@ -127,7 +162,7 @@ def handle_callback(call):
         return
     
     seller_name = pickup_points.get(address)
-    seller_id = sellers_chat_id.get(seller_name)
+    seller_id = get_seller_id(seller_name)  # ИСПОЛЬЗУЕМ ФУНКЦИЮ!
     
     if seller_id:
         # Формируем информацию о покупателе
@@ -148,7 +183,7 @@ def handle_callback(call):
             bot.send_message(seller_id, seller_message)
             success = True
         except Exception as e:
-            print(f"Ошибка отправки продавцу: {e}")
+            print(f"❌ Ошибка отправки продавцу {seller_name}: {e}")
             success = False
         
         # Ответ покупателю
@@ -180,6 +215,7 @@ def handle_callback(call):
             bot.answer_callback_query(call.id, "⚠️ Задержка с уведомлением")
     else:
         bot.answer_callback_query(call.id, "❌ Ошибка: точка временно недоступна")
+        print(f"❌ Не удалось получить ID продавца для {seller_name}")
 
 # ====== WEBHOOK ======
 @app.route('/webhook', methods=['POST'])
@@ -209,6 +245,3 @@ if __name__ == '__main__':
     # Запускаем сервер
     port = int(os.environ.get('PORT', 10000))
     app.run(host='0.0.0.0', port=port, debug=False)
-
-
-
