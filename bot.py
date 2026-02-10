@@ -27,23 +27,30 @@ sellers_chat_id = {
     "Рабочий": 8230946109
 }
 
-# ====== ОБРАБОТЧИКИ ======
-@bot.message_handler(commands=['start'])
-def send_welcome(message):
-    # Создаем клавиатуру с постоянными кнопками (каждая кнопка в отдельном ряду)
+def show_instruction_with_keyboard(chat_id):
+    """Показать инструкцию с клавиатурой"""
     main_keyboard = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True)
-    main_keyboard.add('Каталог с ценами')  # Первая кнопка в первом ряду
-    main_keyboard.add('О нас')  # Вторая кнопка во втором ряду
+    main_keyboard.add('Каталог с ценами')
+    main_keyboard.add('О нас')
     
-    bot.send_message(
-        message.chat.id,
+    instruction_text = (
         "🟢 *Пошаговая инструкция:*\n\n"
         "1. Напишите, что хотите заказать\n"
         "2. Выберите откуда удобнее забрать\n"
-        "3. Менеджер свяжется с вами",
+        "3. Менеджер свяжется с вами"
+    )
+    
+    bot.send_message(
+        chat_id,
+        instruction_text,
         parse_mode="Markdown",
         reply_markup=main_keyboard
     )
+
+# ====== ОБРАБОТЧИКИ ======
+@bot.message_handler(commands=['start'])
+def send_welcome(message):
+    show_instruction_with_keyboard(message.chat.id)
 
 @bot.message_handler(func=lambda message: message.text == 'Каталог с ценами')
 def send_catalog(message):
@@ -57,6 +64,7 @@ def send_catalog(message):
         "*Для заказа напишите что Вам нужно*"
     )
     bot.send_message(message.chat.id, catalog_text, parse_mode="Markdown")
+    show_instruction_with_keyboard(message.chat.id)  # Показываем инструкцию после каталога
 
 @bot.message_handler(func=lambda message: message.text == 'О нас')
 def send_about(message):
@@ -70,6 +78,7 @@ def send_about(message):
         "*Наш канал: t.me/dp_sbor *"
     )
     bot.send_message(message.chat.id, about_text, parse_mode="Markdown")
+    show_instruction_with_keyboard(message.chat.id)  # Показываем инструкцию после информации "О нас"
 
 @bot.message_handler(func=lambda message: True, content_types=['text'])
 def handle_text(message):
@@ -200,3 +209,4 @@ if __name__ == '__main__':
     # Запускаем сервер
     port = int(os.environ.get('PORT', 10000))
     app.run(host='0.0.0.0', port=port, debug=False)
+
