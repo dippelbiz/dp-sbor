@@ -30,9 +30,10 @@ sellers_chat_id = {
 # ====== ОБРАБОТЧИКИ ======
 @bot.message_handler(commands=['start'])
 def send_welcome(message):
-    # Создаем клавиатуру с постоянными кнопками
+    # Создаем клавиатуру с постоянными кнопками (каждая кнопка в отдельном ряду)
     main_keyboard = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True)
-    main_keyboard.row('Каталог с ценами', 'О нас')
+    main_keyboard.add('Каталог с ценами')  # Первая кнопка в первом ряду
+    main_keyboard.add('О нас')  # Вторая кнопка во втором ряду
     
     bot.send_message(
         message.chat.id,
@@ -48,12 +49,12 @@ def send_welcome(message):
 def send_catalog(message):
     catalog_text = (
         "📋 *Каталог с ценами*\n\n"
-        "1. Грецкий орех очищенный, 500г - 400 ₽\n"
-        "2. Миндаль золотой, 1000г - 950 ₽\n"
-        "3. Кешью WW320, 1000г - 1000 ₽\n"
-        "4. Манго сушеное, 500г - 250 ₽\n"
-        "5. Клубника сушеная, 500г- 350 ₽\n\n"
-        "*Для заказа просто напишите что Вам нужно*"
+        "1. *Грецкий орех очищенный*, 500г - 400 ₽\n"
+        "2. *Миндаль золотой*, 1000г - 950 ₽\n"
+        "3. *Кешью WW320*, 1000г - 1000 ₽\n"
+        "4. *Манго сушеное*, 500г - 250 ₽\n"
+        "5. *Клубника сушеная*, 500г- 350 ₽\n\n"
+        "*Для заказа напишите что Вам нужно*"
     )
     bot.send_message(message.chat.id, catalog_text, parse_mode="Markdown")
 
@@ -199,4 +200,3 @@ if __name__ == '__main__':
     # Запускаем сервер
     port = int(os.environ.get('PORT', 10000))
     app.run(host='0.0.0.0', port=port, debug=False)
-
