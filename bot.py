@@ -24,22 +24,58 @@ sellers_chat_id = {
     "Юлия": 1518506615,
     "Евгений": 5750504640,
     "Татьяна": 2051690432,
-    "Рабочий": 8230946109  # ← ДОБАВЬТЕ ДВОЕТОЧИЕ!
+    "Рабочий": 8230946109
 }
 
 # ====== ОБРАБОТЧИКИ ======
 @bot.message_handler(commands=['start'])
 def send_welcome(message):
-    bot.reply_to(message,
+    # Создаем клавиатуру с постоянными кнопками
+    main_keyboard = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True)
+    main_keyboard.row('Каталог с ценами', 'О нас')
+    
+    bot.send_message(
+        message.chat.id,
         "🟢 *Пошаговая инструкция:*\n\n"
         "1. Напишите, что хотите заказать\n"
         "2. Выберите откуда удобнее забрать\n"
         "3. Менеджер свяжется с вами",
-        parse_mode="Markdown"
+        parse_mode="Markdown",
+        reply_markup=main_keyboard
     )
+
+@bot.message_handler(func=lambda message: message.text == 'Каталог с ценами')
+def send_catalog(message):
+    catalog_text = (
+        "📋 *Каталог с ценами*\n\n"
+        "1. Грецкий орех очищенный, 500г - 400 ₽\n"
+        "2. Миндаль золотой, 1000г - 950 ₽\n"
+        "3. Кешью WW320, 1000г - 1000 ₽\n"
+        "4. Манго сушеное, 500г - 250 ₽\n"
+        "5. Клубника сушеная, 500г- 350 ₽\n\n"
+        "*Для заказа просто напишите что Вам нужно*"
+    )
+    bot.send_message(message.chat.id, catalog_text, parse_mode="Markdown")
+
+@bot.message_handler(func=lambda message: message.text == 'О нас')
+def send_about(message):
+    about_text = (
+        "🏢 *О нашей компании*\n\n"
+        "*DP SBOR | Отборные орехи и сухофрукты • Новосибирск*\n"
+        "Мы выбираем продукты по качеству, вкусу и внешнему виду, а не по минимальной цене\n"
+"Всё, начиная от выбора товара, заканчивая фасовкой и упаковкой проходит жесткий контроль\n"
+        "*Вы гарантированно получаете высшее качество по шикарным ценам*\n"
+📍 На данный момент есть 5 точек *в Новосибирске*, где можно забрать заказ\n"
+"*Наш канал: t.me/dp_sbor *"
+    )
+    bot.send_message(message.chat.id, about_text, parse_mode="Markdown")
 
 @bot.message_handler(func=lambda message: True, content_types=['text'])
 def handle_text(message):
+    # Пропускаем команды, которые уже обработаны
+    if message.text in ['Каталог с ценами', 'О нас']:
+        return
+    
     # Сохраняем данные
     user_data[message.chat.id] = {
         'text': message.text,
@@ -163,8 +199,3 @@ if __name__ == '__main__':
     # Запускаем сервер
     port = int(os.environ.get('PORT', 10000))
     app.run(host='0.0.0.0', port=port, debug=False)
-
-
-
-
-
