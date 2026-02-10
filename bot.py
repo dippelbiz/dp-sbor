@@ -20,11 +20,11 @@ pickup_points = {
 }
 
 sellers_chat_id = {
-    "Александр": 952957376,
-    "Юлия": 1518506615,
-    "Евгений": 5750504640,
-    "Татьяна": 2051690432,
-    "Рабочий": 8230946109
+    "Александр": ('Seller_Aleksandr'),
+    "Юлия": ('Seller_Yulia'),
+    "Евгений": ('Seller_Evgeniy'),
+    "Татьяна": ('Seller_Tatiana'),
+    "Рабочий": ('Seller_Rabochiy')
 }
 
 def show_instruction_with_keyboard(chat_id):
@@ -209,5 +209,6 @@ if __name__ == '__main__':
     # Запускаем сервер
     port = int(os.environ.get('PORT', 10000))
     app.run(host='0.0.0.0', port=port, debug=False)
+
 
 
