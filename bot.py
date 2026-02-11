@@ -205,8 +205,20 @@ def handle_text(message):
                     f"❌ Не удалось отправить сообщение"
                 )
             return
+        else:
+            # Если заказ не найден, удаляем из активных чатов
+            if user_id in active_chats:
+                del active_chats[user_id]
     
     # --- НОВЫЙ ЗАКАЗ ОТ ПОКУПАТЕЛЯ ---
+    # Проверяем, нет ли у покупателя активного заказа
+    if user_id in active_chats:
+        bot.send_message(
+            user_id,
+            "⚠️ У вас уже есть активный заказ. Дождитесь завершения текущего заказа."
+        )
+        return
+    
     # Сохраняем данные
     user_data[user_id] = {
         'text': message.text,
@@ -234,10 +246,7 @@ def handle_callback(call):
     user_id = call.from_user.id
     
     if call.data == "NEW_ORDER":
-        # Сбрасываем активный чат для покупателя
-        if user_id in active_chats:
-            del active_chats[user_id]
-        
+        # Покупатель хочет сделать новый заказ
         bot.answer_callback_query(call.id)
         bot.edit_message_text("🔄 Начинаем новый заказ", chat_id, call.message.message_id)
         bot.send_message(chat_id, "Напишите что хотите заказать:")
@@ -314,37 +323,28 @@ def handle_callback(call):
             print(f"❌ Ошибка отправки продавцу {seller_name}: {e}")
             success = False
         
-        # Сообщение покупателю
+        # Сообщение покупателю - ЗАКАЗ В ОБРАБОТКЕ
         buyer_message = (
-            f"✅ *Заказ принят!*\n\n"
+            f"🔄 *Ваш заказ в обработке*\n\n"
             f"📍 Адрес: {address}\n"
             f"📝 Ваш заказ: {user_info['text']}\n\n"
-            f"💬 *Чат с менеджером открыт!*\n"
-            f"Теперь вы можете общаться с менеджером.\n"
-            f"Просто напишите сообщение - оно отправится менеджеру."
+            f"*Менеджер скоро свяжется с Вами в этом чате.*"
         )
         
-        user_keyboard = telebot.types.InlineKeyboardMarkup()
-        user_keyboard.add(telebot.types.InlineKeyboardButton(
-            "🔄 Сделать новый заказ", 
-            callback_data="NEW_ORDER"
-        ))
-        
+        # У покупателя НЕТ кнопки "Сделать новый заказ" пока заказ активен
         if success:
             bot.edit_message_text(
                 buyer_message,
                 chat_id,
                 call.message.message_id,
-                parse_mode="Markdown",
-                reply_markup=user_keyboard
+                parse_mode="Markdown"
             )
-            bot.answer_callback_query(call.id, "✅ Заказ отправлен! Можете общаться с менеджером")
+            bot.answer_callback_query(call.id, "✅ Заказ отправлен менеджеру")
         else:
             bot.edit_message_text(
                 f"⚠️ Заказ принят, но продавец пока не получил уведомление.",
                 chat_id,
-                call.message.message_id,
-                reply_markup=user_keyboard
+                call.message.message_id
             )
             bot.answer_callback_query(call.id, "⚠️ Задержка с уведомлением")
     else:
@@ -352,7 +352,7 @@ def handle_callback(call):
         print(f"❌ Не удалось получить ID продавца для {seller_name}")
 
 def handle_seller_callback(call):
-    """Обработка действий продавца"""
+    """Обработка действий продавца - Завершить заказ"""
     seller_id = call.from_user.id
     parts = call.data.split('_')
     order_id = int(parts[2])
@@ -366,14 +366,17 @@ def handle_seller_callback(call):
     # Завершаем заказ
     try:
         # Отправляем финальное сообщение покупателю
+        final_message = (
+            f"✅ *Ваш заказ принят*\n\n"
+            f"📍 Адрес: {order['address']}\n"
+            f"📝 Ваш заказ: {order['order_text']}\n\n"
+            f"💬 *Чат с менеджером закрыт*\n"
+            f"Спасибо за покупку! 🛍️"
+        )
+        
         bot.send_message(
             order['buyer_id'],
-            f"✅ *Ваш заказ принят и завершен!*\n\n"
-            f"📍 Адрес получения: {order['address']}\n"
-            f"📝 Ваш заказ: {order['order_text']}\n\n"
-            f"Заказ готов к выдаче!\n"
-            f"Спасибо за покупку! 🛍️\n\n"
-            f"💬 *Чат с менеджером закрыт*",
+            final_message,
             parse_mode="Markdown"
         )
         
