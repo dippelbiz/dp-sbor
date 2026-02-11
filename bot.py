@@ -2,6 +2,7 @@ import os
 import telebot
 from flask import Flask, request
 from datetime import datetime
+import time
 
 # ====== НАСТРОЙКИ ======
 TOKEN = os.environ.get('BOT_TOKEN')
@@ -76,6 +77,21 @@ def get_seller_active_orders(seller_id):
         if order['seller_id'] == seller_id:
             seller_orders.append(order_id)
     return seller_orders
+
+def clear_chat_history(chat_id, except_message_id=None):
+    """Очистка истории чата"""
+    try:
+        # Получаем последние 100 сообщений
+        messages_to_delete = []
+        for i in range(1, 100):
+            try:
+                bot.delete_message(chat_id, i)
+                messages_to_delete.append(i)
+            except:
+                pass
+            time.sleep(0.05)  # Небольшая задержка чтобы не превысить лимиты
+    except:
+        pass
 
 # Проверяем при запуске
 print("=" * 50)
@@ -179,7 +195,7 @@ def handle_text(message):
                     reply_markup=seller_keyboard
                 )
                 
-                # Отправляем уведомление покупателю (это сообщение будет удалено при завершении)
+                # Отправляем уведомление покупателю
                 bot.send_message(
                     order['buyer_id'],
                     f"📝 *Уточненный заказ:*\n\n{text}\n\n"
@@ -210,7 +226,7 @@ def handle_text(message):
                 
                 if order_id in active_orders and active_orders[order_id]['seller_id'] == user_id:
                     order = active_orders[order_id]
-                    # Отправляем сообщение покупателю (будет удалено при завершении)
+                    # Отправляем сообщение покупателю
                     bot.send_message(
                         order['buyer_id'],
                         f"💬 *Сообщение от менеджера:*\n\n{message_text}",
@@ -316,7 +332,8 @@ def handle_callback(call):
     if call.data == "NEW_ORDER":
         # Покупатель хочет сделать новый заказ
         bot.answer_callback_query(call.id)
-        bot.send_message(chat_id, "Напишите что хотите заказать:")
+        # Показываем инструкцию для нового заказа
+        show_instruction_with_keyboard(chat_id)
         return
     
     # Обработка кнопок продавца
@@ -398,7 +415,13 @@ def handle_callback(call):
             print(f"❌ Ошибка отправки продавцу {seller_name}: {e}")
             success = False
         
-        # Сообщение покупателю - ЗАКАЗ В ОБРАБОТКЕ (будет удалено при завершении)
+        # Удаляем сообщение с кнопками выбора адреса
+        try:
+            bot.delete_message(chat_id, call.message.message_id)
+        except:
+            pass
+        
+        # Сообщение покупателю - ЗАКАЗ В ОБРАБОТКЕ
         buyer_message = (
             f"🔄 *Ваш заказ в обработке*\n\n"
             f"📍 Адрес: {address}\n"
@@ -419,12 +442,6 @@ def handle_callback(call):
                 f"⚠️ Заказ принят, но продавец пока не получил уведомление."
             )
             bot.answer_callback_query(call.id, "⚠️ Задержка с уведомлением")
-        
-        # Удаляем сообщение с кнопками выбора адреса
-        try:
-            bot.delete_message(chat_id, call.message.message_id)
-        except:
-            pass
     else:
         bot.answer_callback_query(call.id, "❌ Ошибка: точка временно недоступна")
         print(f"❌ Не удалось получить ID продавца для {seller_name}")
@@ -483,6 +500,10 @@ def handle_seller_close_callback(call):
         final_order_text = order['order_text']
         order_date = order['updated_at'] if order['updated_at'] else order['timestamp']
         
+        # Удаляем все сообщения в чате покупателя, связанные с этим заказом
+        # (кроме финального, которое отправим сейчас)
+        buyer_chat_id = order['buyer_id']
+        
         # Отправляем финальное сообщение покупателю
         final_message = (
             f"✅ *Заказ от {order_date}*\n\n"
@@ -499,7 +520,7 @@ def handle_seller_close_callback(call):
         
         # Отправляем финальное сообщение
         bot.send_message(
-            order['buyer_id'],
+            buyer_chat_id,
             final_message,
             parse_mode="Markdown",
             reply_markup=user_keyboard
