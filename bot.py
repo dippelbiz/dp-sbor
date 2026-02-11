@@ -367,29 +367,22 @@ def handle_seller_callback(call):
     try:
         # Отправляем финальное сообщение покупателю
         final_message = (
-            f"✅ *Ваш заказ принят*\n\n"
-            f"📍 Адрес: {order['address']}\n"
-            f"📝 Ваш заказ: {order['order_text']}\n\n"
-            f"💬 *Чат с менеджером закрыт*\n"
-            f"Спасибо за покупку! 🛍️"
+            f"✅ *Ваш заказ завершен*\n\n"
+            f"📍 Адрес: {order['address']}\n\n"
+            f"💬 *Чат с менеджером закрыт*"
         )
         
+        # Создаем клавиатуру с кнопкой "Сделать новый заказ"
+        user_keyboard = telebot.types.InlineKeyboardMarkup()
+        user_keyboard.row(
+            telebot.types.InlineKeyboardButton("🔄 Сделать новый заказ", callback_data="NEW_ORDER")
+        )
+        
+        # Отправляем сообщение с кнопкой
         bot.send_message(
             order['buyer_id'],
             final_message,
-            parse_mode="Markdown"
-        )
-        
-        # Даем покупателю кнопку для нового заказа
-        user_keyboard = telebot.types.InlineKeyboardMarkup()
-        user_keyboard.add(telebot.types.InlineKeyboardButton(
-            "🔄 Сделать новый заказ", 
-            callback_data="NEW_ORDER"
-        ))
-        
-        bot.send_message(
-            order['buyer_id'],
-            "Хотите сделать еще один заказ?",
+            parse_mode="Markdown",
             reply_markup=user_keyboard
         )
         
