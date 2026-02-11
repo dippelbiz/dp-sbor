@@ -74,7 +74,7 @@ print("🔍 Проверка настроек продавцов:")
 for seller_name in ["Александр", "Юлия", "Евгений", "Татьяна", "Рабочий"]:
     seller_id = get_seller_id(seller_name)
     if seller_id:
-        print(f"✅ {seller_name}: ID установен")
+        print(f"✅ {seller_name}: ID установлен")
     else:
         print(f"❌ {seller_name}: ID НЕ установлен")
 print("=" * 50)
@@ -179,15 +179,21 @@ def handle_text(message):
         order = active_orders.get(order_id)
         
         if order:
-            # Отправляем сообщение продавцу
+            # Отправляем сообщение продавцу С КНОПКОЙ "Завершить заказ"
             try:
+                seller_keyboard = telebot.types.InlineKeyboardMarkup()
+                seller_keyboard.row(
+                    telebot.types.InlineKeyboardButton("✅ Завершить заказ", callback_data=f"seller_close_{order_id}")
+                )
+                
                 bot.send_message(
                     order['seller_id'],
                     f"📩 *Сообщение от покупателя:*\n\n"
                     f"👤 {order['buyer_name']}\n"
                     f"📝 Заказ: {order['order_text']}\n\n"
                     f"💬 {message.text}",
-                    parse_mode="Markdown"
+                    parse_mode="Markdown",
+                    reply_markup=seller_keyboard
                 )
                 bot.send_message(
                     user_id,
@@ -237,8 +243,8 @@ def handle_callback(call):
         bot.send_message(chat_id, "Напишите что хотите заказать:")
         return
     
-    # Обработка кнопок продавцов
-    if call.data.startswith(('seller_reply_', 'seller_close_')):
+    # Обработка кнопки "Завершить заказ"
+    if call.data.startswith('seller_close_'):
         handle_seller_callback(call)
         return
     
@@ -282,7 +288,7 @@ def handle_callback(call):
         active_chats[buyer_id] = order_id
         active_chats[seller_id] = order_id
         
-        # Сообщение продавцу
+        # Сообщение продавцу С КНОПКОЙ "Завершить заказ"
         seller_message = (
             f"📦 *НОВЫЙ ЗАКАЗ #{order_id}*\n"
             f"⏰ {datetime.now().strftime('%H:%M %d.%m.%Y')}\n\n"
@@ -349,7 +355,6 @@ def handle_seller_callback(call):
     """Обработка действий продавца"""
     seller_id = call.from_user.id
     parts = call.data.split('_')
-    action = parts[1]  # reply или close
     order_id = int(parts[2])
     
     order = active_orders.get(order_id)
@@ -358,48 +363,44 @@ def handle_seller_callback(call):
         bot.answer_callback_query(call.id, "❌ Заказ не найден")
         return
     
-    if action == "reply":
-        # Эта функция больше не нужна, так как чат работает постоянно
-        pass
+    # Завершаем заказ
+    try:
+        # Отправляем финальное сообщение покупателю
+        bot.send_message(
+            order['buyer_id'],
+            f"✅ *Ваш заказ принят и завершен!*\n\n"
+            f"📍 Адрес получения: {order['address']}\n"
+            f"📝 Ваш заказ: {order['order_text']}\n\n"
+            f"Заказ готов к выдаче!\n"
+            f"Спасибо за покупку! 🛍️\n\n"
+            f"💬 *Чат с менеджером закрыт*",
+            parse_mode="Markdown"
+        )
         
-    elif action == "close":
-        # Завершаем заказ
+        # Даем покупателю кнопку для нового заказа
+        user_keyboard = telebot.types.InlineKeyboardMarkup()
+        user_keyboard.add(telebot.types.InlineKeyboardButton(
+            "🔄 Сделать новый заказ", 
+            callback_data="NEW_ORDER"
+        ))
+        
+        bot.send_message(
+            order['buyer_id'],
+            "Хотите сделать еще один заказ?",
+            reply_markup=user_keyboard
+        )
+        
+        # Закрываем активные чаты
+        if order['buyer_id'] in active_chats:
+            del active_chats[order['buyer_id']]
+        if seller_id in active_chats:
+            del active_chats[seller_id]
+        
+        # Удаляем заказ из активных
+        del active_orders[order_id]
+        
+        # Обновляем последнее сообщение продавца
         try:
-            # Отправляем финальное сообщение покупателю
-            bot.send_message(
-                order['buyer_id'],
-                f"✅ *Ваш заказ принят и завершен!*\n\n"
-                f"📍 Адрес получения: {order['address']}\n"
-                f"📝 Ваш заказ: {order['order_text']}\n\n"
-                f"Заказ готов к выдаче!\n"
-                f"Спасибо за покупку! 🛍️\n\n"
-                f"💬 *Чат с менеджером закрыт*",
-                parse_mode="Markdown"
-            )
-            
-            # Даем покупателю кнопку для нового заказа
-            user_keyboard = telebot.types.InlineKeyboardMarkup()
-            user_keyboard.add(telebot.types.InlineKeyboardButton(
-                "🔄 Сделать новый заказ", 
-                callback_data="NEW_ORDER"
-            ))
-            
-            bot.send_message(
-                order['buyer_id'],
-                "Хотите сделать еще один заказ?",
-                reply_markup=user_keyboard
-            )
-            
-            # Закрываем активные чаты
-            if order['buyer_id'] in active_chats:
-                del active_chats[order['buyer_id']]
-            if seller_id in active_chats:
-                del active_chats[seller_id]
-            
-            # Удаляем заказ из активных
-            del active_orders[order_id]
-            
-            # Обновляем сообщение у продавца
             bot.edit_message_text(
                 f"✅ *ЗАКАЗ ЗАВЕРШЕН #{order_id}*\n\n"
                 f"👤 Покупатель: {order['buyer_name']}\n"
@@ -411,11 +412,23 @@ def handle_seller_callback(call):
                 call.message.message_id,
                 parse_mode="Markdown"
             )
-            
-            bot.answer_callback_query(call.id, "✅ Заказ завершен, чат закрыт")
-            
-        except Exception as e:
-            bot.answer_callback_query(call.id, f"❌ Ошибка: {str(e)[:50]}")
+        except:
+            # Если не удалось отредактировать, отправляем новое сообщение
+            bot.send_message(
+                seller_id,
+                f"✅ *ЗАКАЗ ЗАВЕРШЕН #{order_id}*\n\n"
+                f"👤 Покупатель: {order['buyer_name']}\n"
+                f"📍 Точка: {order['address']}\n"
+                f"📝 Заказ: {order['order_text']}\n\n"
+                f"🕒 Создан: {order['timestamp']}\n"
+                f"🏁 Завершен: {datetime.now().strftime('%H:%M %d.%m.%Y')}",
+                parse_mode="Markdown"
+            )
+        
+        bot.answer_callback_query(call.id, "✅ Заказ завершен, чат закрыт")
+        
+    except Exception as e:
+        bot.answer_callback_query(call.id, f"❌ Ошибка: {str(e)[:50]}")
 
 # ====== WEBHOOK ======
 @app.route('/webhook', methods=['POST'])
