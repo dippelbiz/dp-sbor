@@ -13,9 +13,10 @@ bot = telebot.TeleBot(TOKEN)
 app = Flask(__name__)
 
 # Хранилища данных
-user_data = {}
+user_data = {}  # Для временных данных пользователей
 order_counter = 0  # Счетчик заказов
-active_orders = {}  # Активные заказы для продавцов {order_id: order_data}
+active_orders = {}  # Активные заказы {order_id: order_data}
+active_chats = {}   # Активные чаты {buyer_id: order_id} и {seller_id: order_id}
 
 # Список точек
 pickup_points = {
@@ -63,13 +64,17 @@ def get_all_seller_ids():
             seller_ids.append(seller_id)
     return seller_ids
 
+def is_seller(user_id):
+    """Проверка, является ли пользователь продавцом"""
+    return user_id in get_all_seller_ids()
+
 # Проверяем при запуске
 print("=" * 50)
 print("🔍 Проверка настроек продавцов:")
 for seller_name in ["Александр", "Юлия", "Евгений", "Татьяна", "Рабочий"]:
     seller_id = get_seller_id(seller_name)
     if seller_id:
-        print(f"✅ {seller_name}: ID установлен")
+        print(f"✅ {seller_name}: ID установен")
     else:
         print(f"❌ {seller_name}: ID НЕ установлен")
 print("=" * 50)
@@ -126,19 +131,19 @@ def send_about(message):
     )
     bot.send_message(message.chat.id, about_text, parse_mode="Markdown")
 
-# Обработка сообщений от продавцов (ответы покупателям)
 @bot.message_handler(func=lambda message: True, content_types=['text'])
 def handle_text(message):
+    user_id = message.from_user.id
+    
     # Пропускаем команды, которые уже обработаны
     if message.text in ['Каталог с ценами', 'О нас']:
         return
     
-    # ПРОВЕРЯЕМ: не является ли сообщение ответом продавца?
-    seller_ids = get_all_seller_ids()
-    if message.from_user.id in seller_ids:
-        # Проверяем, находится ли продавец в режиме ответа
-        if message.from_user.id in user_data and 'replying_to' in user_data[message.from_user.id]:
-            order_id = user_data[message.from_user.id]['replying_to']
+    # Проверяем, является ли пользователь продавцом
+    if is_seller(user_id):
+        # Проверяем, ведет ли продавец активный чат
+        if user_id in active_chats:
+            order_id = active_chats[user_id]
             order = active_orders.get(order_id)
             
             if order:
@@ -146,35 +151,61 @@ def handle_text(message):
                 try:
                     bot.send_message(
                         order['buyer_id'],
-                        f"💬 *Сообщение от менеджера:*\n\n{message.text}\n\n"
-                        f"_Вы можете ответить прямо здесь_",
+                        f"💬 *Сообщение от менеджера:*\n\n{message.text}",
                         parse_mode="Markdown"
                     )
                     bot.send_message(
-                        message.from_user.id,
-                        f"✅ Сообщение отправлено покупателю\n"
-                        f"Заказ #{order_id} - {order['buyer_name']}"
+                        user_id,
+                        f"✅ Сообщение отправлено покупателю"
                     )
-                    
                 except Exception as e:
                     bot.send_message(
-                        message.from_user.id,
-                        f"❌ Не удалось отправить сообщение. Ошибка: {str(e)[:100]}"
+                        user_id,
+                        f"❌ Не удалось отправить сообщение"
                     )
-                
-                # Очищаем режим ответа
-                del user_data[message.from_user.id]['replying_to']
-                if not user_data[message.from_user.id]:
-                    del user_data[message.from_user.id]
-            
+                return
+        
+        # Если продавец не в активном чате, игнорируем сообщение
+        bot.send_message(
+            user_id,
+            "Вы не ведете активный чат. Дождитесь нового заказа."
+        )
+        return
+    
+    # --- ПОКУПАТЕЛЬ ---
+    # Проверяем, ведет ли покупатель активный чат
+    if user_id in active_chats:
+        order_id = active_chats[user_id]
+        order = active_orders.get(order_id)
+        
+        if order:
+            # Отправляем сообщение продавцу
+            try:
+                bot.send_message(
+                    order['seller_id'],
+                    f"📩 *Сообщение от покупателя:*\n\n"
+                    f"👤 {order['buyer_name']}\n"
+                    f"📝 Заказ: {order['order_text']}\n\n"
+                    f"💬 {message.text}",
+                    parse_mode="Markdown"
+                )
+                bot.send_message(
+                    user_id,
+                    f"✅ Сообщение отправлено менеджеру"
+                )
+            except Exception as e:
+                bot.send_message(
+                    user_id,
+                    f"❌ Не удалось отправить сообщение"
+                )
             return
     
-    # --- ОБЫЧНЫЙ ПОТОК ДЛЯ ПОКУПАТЕЛЕЙ (БЕЗ ИЗМЕНЕНИЙ) ---
+    # --- НОВЫЙ ЗАКАЗ ОТ ПОКУПАТЕЛЯ ---
     # Сохраняем данные
-    user_data[message.chat.id] = {
+    user_data[user_id] = {
         'text': message.text,
         'name': message.from_user.first_name or "Покупатель",
-        'user_id': message.from_user.id
+        'user_id': user_id
     }
     
     # Создаем кнопки с адресами
@@ -186,7 +217,7 @@ def handle_text(message):
         ))
     
     bot.send_message(
-        message.chat.id, 
+        user_id, 
         "✅ Сообщение получено! Выберите удобный адрес:",
         reply_markup=keyboard
     )
@@ -194,8 +225,13 @@ def handle_text(message):
 @bot.callback_query_handler(func=lambda call: True)
 def handle_callback(call):
     chat_id = call.message.chat.id
+    user_id = call.from_user.id
     
     if call.data == "NEW_ORDER":
+        # Сбрасываем активный чат для покупателя
+        if user_id in active_chats:
+            del active_chats[user_id]
+        
         bot.answer_callback_query(call.id)
         bot.edit_message_text("🔄 Начинаем новый заказ", chat_id, call.message.message_id)
         bot.send_message(chat_id, "Напишите что хотите заказать:")
@@ -207,9 +243,8 @@ def handle_callback(call):
         return
     
     # --- ОБРАБОТКА ВЫБОРА АДРЕСА (ДЛЯ ПОКУПАТЕЛЕЙ) ---
-    # Обработка выбора адреса
     address = call.data
-    user_info = user_data.get(chat_id)
+    user_info = user_data.get(user_id)
     
     if not user_info:
         bot.answer_callback_query(call.id, "❌ Ошибка: начните заказ заново")
@@ -239,9 +274,13 @@ def handle_callback(call):
             'address': address,
             'order_text': user_info['text'],
             'timestamp': datetime.now().strftime("%H:%M %d.%m.%Y"),
-            'status': 'new'
+            'status': 'active'
         }
         active_orders[order_id] = order_data
+        
+        # Активируем чаты
+        active_chats[buyer_id] = order_id
+        active_chats[seller_id] = order_id
         
         # Сообщение продавцу
         seller_message = (
@@ -250,13 +289,15 @@ def handle_callback(call):
             f"👤 *Покупатель:* {buyer_name}\n"
             f"📍 *Точка:* {address}\n"
             f"📝 *Заказ:* {user_info['text']}\n\n"
-            f"🆔 ID покупателя: {buyer_id}"
+            f"🆔 ID покупателя: {buyer_id}\n\n"
+            f"💬 *Чат активирован!*\n"
+            f"Теперь вы можете общаться с покупателем.\n"
+            f"Просто напишите сообщение - оно отправится покупателю."
         )
         
-        # Клавиатура для продавца (ТОЛЬКО 2 КНОПКИ)
+        # Клавиатура для продавца
         seller_keyboard = telebot.types.InlineKeyboardMarkup()
         seller_keyboard.row(
-            telebot.types.InlineKeyboardButton("📨 Ответить покупателю", callback_data=f"seller_reply_{order_id}"),
             telebot.types.InlineKeyboardButton("✅ Завершить заказ", callback_data=f"seller_close_{order_id}")
         )
         
@@ -267,7 +308,16 @@ def handle_callback(call):
             print(f"❌ Ошибка отправки продавцу {seller_name}: {e}")
             success = False
         
-        # Ответ покупателю (БЕЗ ИЗМЕНЕНИЙ)
+        # Сообщение покупателю
+        buyer_message = (
+            f"✅ *Заказ принят!*\n\n"
+            f"📍 Адрес: {address}\n"
+            f"📝 Ваш заказ: {user_info['text']}\n\n"
+            f"💬 *Чат с менеджером открыт!*\n"
+            f"Теперь вы можете общаться с менеджером.\n"
+            f"Просто напишите сообщение - оно отправится менеджеру."
+        )
+        
         user_keyboard = telebot.types.InlineKeyboardMarkup()
         user_keyboard.add(telebot.types.InlineKeyboardButton(
             "🔄 Сделать новый заказ", 
@@ -276,16 +326,13 @@ def handle_callback(call):
         
         if success:
             bot.edit_message_text(
-                f"✅ Заказ принят!\n\n"
-                f"📍 Адрес: {address}\n"
-                f"📝 Ваш заказ: {user_info['text']}\n\n"
-                f"*Менеджер свяжется с Вами в ближайшее время*.",
+                buyer_message,
                 chat_id,
                 call.message.message_id,
                 parse_mode="Markdown",
                 reply_markup=user_keyboard
             )
-            bot.answer_callback_query(call.id, "✅ Заказ отправлен!")
+            bot.answer_callback_query(call.id, "✅ Заказ отправлен! Можете общаться с менеджером")
         else:
             bot.edit_message_text(
                 f"⚠️ Заказ принят, но продавец пока не получил уведомление.",
@@ -312,33 +359,21 @@ def handle_seller_callback(call):
         return
     
     if action == "reply":
-        # Переводим продавца в режим ответа
-        if seller_id not in user_data:
-            user_data[seller_id] = {}
-        user_data[seller_id]['replying_to'] = order_id
-        
-        bot.send_message(
-            seller_id,
-            f"✍️ *Режим ответа для заказа #{order_id}*\n\n"
-            f"Покупатель: {order['buyer_name']}\n"
-            f"Заказ: {order['order_text']}\n\n"
-            f"Напишите сообщение для покупателя:\n"
-            f"(оно будет отправлено через бота)",
-            parse_mode="Markdown"
-        )
-        bot.answer_callback_query(call.id)
+        # Эта функция больше не нужна, так как чат работает постоянно
+        pass
         
     elif action == "close":
-        # Завершаем заказ и уведомляем покупателя
+        # Завершаем заказ
         try:
             # Отправляем финальное сообщение покупателю
             bot.send_message(
                 order['buyer_id'],
-                f"✅ *Ваш заказ принят!*\n\n"
+                f"✅ *Ваш заказ принят и завершен!*\n\n"
                 f"📍 Адрес получения: {order['address']}\n"
                 f"📝 Ваш заказ: {order['order_text']}\n\n"
                 f"Заказ готов к выдаче!\n"
-                f"Спасибо за покупку! 🛍️",
+                f"Спасибо за покупку! 🛍️\n\n"
+                f"💬 *Чат с менеджером закрыт*",
                 parse_mode="Markdown"
             )
             
@@ -354,6 +389,12 @@ def handle_seller_callback(call):
                 "Хотите сделать еще один заказ?",
                 reply_markup=user_keyboard
             )
+            
+            # Закрываем активные чаты
+            if order['buyer_id'] in active_chats:
+                del active_chats[order['buyer_id']]
+            if seller_id in active_chats:
+                del active_chats[seller_id]
             
             # Удаляем заказ из активных
             del active_orders[order_id]
@@ -371,7 +412,7 @@ def handle_seller_callback(call):
                 parse_mode="Markdown"
             )
             
-            bot.answer_callback_query(call.id, "✅ Заказ завершен, покупатель уведомлен")
+            bot.answer_callback_query(call.id, "✅ Заказ завершен, чат закрыт")
             
         except Exception as e:
             bot.answer_callback_query(call.id, f"❌ Ошибка: {str(e)[:50]}")
