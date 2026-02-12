@@ -1,7 +1,8 @@
-import os
+ import os
 import telebot
 from flask import Flask, request
 from datetime import datetime
+import json
 import time
 
 # ====== НАСТРОЙКИ ======
@@ -12,6 +13,9 @@ if not TOKEN:
 
 bot = telebot.TeleBot(TOKEN)
 app = Flask(__name__)
+
+# Имя файла для хранения данных
+DATA_FILE = 'bot_data.json'
 
 # Хранилища данных
 user_data = {}  # Для временных данных пользователей
@@ -28,6 +32,61 @@ pickup_points = {
     "ул. Сержанта Коротаева 3": "Татьяна",
     "ул. Бетонная 14/1": "Рабочий"
 }
+
+# ====== ФУНКЦИИ ДЛЯ РАБОТЫ С ФАЙЛАМИ ======
+def save_data():
+    """Сохраняем активные заказы и счетчик в файл"""
+    data = {
+        'order_counter': order_counter,
+        'active_orders': {}
+    }
+    
+    # Преобразуем заказы в сохраняемый формат
+    for order_id, order in active_orders.items():
+        data['active_orders'][str(order_id)] = order
+    
+    try:
+        with open(DATA_FILE, 'w', encoding='utf-8') as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+        print(f"✅ Данные сохранены: {len(active_orders)} активных заказов")
+    except Exception as e:
+        print(f"❌ Ошибка сохранения данных: {e}")
+
+def load_data():
+    """Загружаем активные заказы и счетчик из файла"""
+    global order_counter, active_orders, active_chats
+    
+    if not os.path.exists(DATA_FILE):
+        print("📁 Файл данных не найден, начинаем с нуля")
+        return
+    
+    try:
+        with open(DATA_FILE, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+        
+        order_counter = data.get('order_counter', 0)
+        active_orders = {}
+        active_chats = {}
+        
+        # Восстанавливаем активные заказы
+        loaded_orders = 0
+        for order_id_str, order in data.get('active_orders', {}).items():
+            order_id = int(order_id_str)
+            active_orders[order_id] = order
+            loaded_orders += 1
+            
+            # Восстанавливаем активные чаты
+            if 'buyer_id' in order:
+                active_chats[order['buyer_id']] = order_id
+        
+        print(f"✅ Данные загружены: {loaded_orders} активных заказов")
+        print(f"📊 Текущий счетчик заказов: {order_counter}")
+        
+    except Exception as e:
+        print(f"❌ Ошибка загрузки данных: {e}")
+
+# Загружаем данные при старте
+load_data()
 
 # ФУНКЦИЯ ДЛЯ ПОЛУЧЕНИЯ ID ПРОДАВЦОВ
 def get_seller_id(seller_name):
@@ -77,32 +136,6 @@ def get_seller_active_orders(seller_id):
         if order['seller_id'] == seller_id:
             seller_orders.append(order_id)
     return seller_orders
-
-def clear_chat_history(chat_id, except_message_id=None):
-    """Очистка истории чата"""
-    try:
-        # Получаем последние 100 сообщений
-        messages_to_delete = []
-        for i in range(1, 100):
-            try:
-                bot.delete_message(chat_id, i)
-                messages_to_delete.append(i)
-            except:
-                pass
-            time.sleep(0.05)  # Небольшая задержка чтобы не превысить лимиты
-    except:
-        pass
-
-# Проверяем при запуске
-print("=" * 50)
-print("🔍 Проверка настроек продавцов:")
-for seller_name in ["Александр", "Юлия", "Евгений", "Татьяна", "Рабочий"]:
-    seller_id = get_seller_id(seller_name)
-    if seller_id:
-        print(f"✅ {seller_name}: ID установлен")
-    else:
-        print(f"❌ {seller_name}: ID НЕ установлен")
-print("=" * 50)
 
 def show_instruction_with_keyboard(chat_id):
     """Показать инструкцию с клавиатурой"""
@@ -176,7 +209,10 @@ def handle_text(message):
                 # Обновляем заказ
                 old_order_text = order['order_text']
                 order['order_text'] = text
-                order['updated_at'] = datetime.now().strftime("%H:%M %d.%m.%Y")
+                order['updated_at'] = datetime.now().strftime("%d.%m.%Y")  # Только дата
+                
+                # Сохраняем изменения
+                save_data()
                 
                 # Отправляем подтверждение продавцу
                 seller_keyboard = telebot.types.InlineKeyboardMarkup()
@@ -224,34 +260,47 @@ def handle_text(message):
                     bot.send_message(user_id, "❌ Не указан текст сообщения. Формат: #номер_заказа текст_сообщения")
                     return
                 
-                if order_id in active_orders and active_orders[order_id]['seller_id'] == user_id:
+                # Проверяем наличие заказа в active_orders
+                print(f"🔍 Продавец {user_id} ищет заказ #{order_id}")
+                print(f"📋 Активные заказы: {list(active_orders.keys())}")
+                
+                if order_id in active_orders:
                     order = active_orders[order_id]
-                    # Отправляем сообщение покупателю
-                    bot.send_message(
-                        order['buyer_id'],
-                        f"💬 *Сообщение от менеджера:*\n\n{message_text}",
-                        parse_mode="Markdown"
-                    )
-                    bot.send_message(user_id, f"✅ Сообщение отправлено покупателю (Заказ #{order_id})")
+                    print(f"✅ Заказ #{order_id} найден, продавец: {order['seller_id']}")
+                    
+                    if order['seller_id'] == user_id:
+                        # Отправляем сообщение покупателю
+                        bot.send_message(
+                            order['buyer_id'],
+                            f"💬 *Сообщение от менеджера:*\n\n{message_text}",
+                            parse_mode="Markdown"
+                        )
+                        bot.send_message(user_id, f"✅ Сообщение отправлено покупателю (Заказ #{order_id})")
+                    else:
+                        bot.send_message(user_id, f"❌ Заказ #{order_id} не принадлежит вам")
+                        print(f"❌ Заказ #{order_id} принадлежит {order['seller_id']}, а не {user_id}")
                 else:
-                    bot.send_message(user_id, f"❌ Заказ #{order_id} не найден или не принадлежит вам")
+                    bot.send_message(user_id, f"❌ Заказ #{order_id} не найден")
+                    print(f"❌ Заказ #{order_id} отсутствует в active_orders")
+                    
             except ValueError:
                 bot.send_message(user_id, "❌ Неправильный номер заказа. Используйте числовой номер, например: #1 привет")
-            except:
-                bot.send_message(user_id, "❌ Неправильный формат. Используйте: #номер_заказа текст_сообщения")
+            except Exception as e:
+                bot.send_message(user_id, f"❌ Ошибка: {str(e)[:100]}")
         else:
             # Если продавец пишет без #, напоминаем ему о формате
             seller_active_orders = get_seller_active_orders(user_id)
             if seller_active_orders:
+                orders_list = '\n'.join([f"• Заказ #{oid}" for oid in seller_active_orders])
                 bot.send_message(
                     user_id,
-                    f"📋 *У вас {len(seller_active_orders)} активных заказов:*\n"
-                    f"{', '.join([f'#{oid}' for oid in seller_active_orders])}\n\n"
+                    f"📋 *У вас {len(seller_active_orders)} активных заказов:*\n\n"
+                    f"{orders_list}\n\n"
                     f"💬 *Чтобы ответить покупателю, начните сообщение с номера заказа:*\n"
                     f"Пример: `#1 Здравствуйте! Ваш заказ будет готов через час`"
                 )
             else:
-                bot.send_message(user_id, "У вас нет активных заказов.")
+                bot.send_message(user_id, "❌ У вас нет активных заказов.")
         return
     
     # --- ПОКУПАТЕЛЬ ---
@@ -286,13 +335,14 @@ def handle_text(message):
             except Exception as e:
                 bot.send_message(
                     user_id,
-                    f"❌ Не удалось отправить сообщение"
+                    f"❌ Не удалось отправить сообщение: {str(e)[:100]}"
                 )
             return
         else:
             # Если заказ не найден, удаляем из активных чатов
             if user_id in active_chats:
                 del active_chats[user_id]
+                save_data()
     
     # --- НОВЫЙ ЗАКАЗ ОТ ПОКУПАТЕЛЯ ---
     # Проверяем, нет ли у покупателя активного заказа
@@ -375,7 +425,7 @@ def handle_callback(call):
             'seller_name': seller_name,
             'address': address,
             'order_text': user_info['text'],
-            'timestamp': datetime.now().strftime("%H:%M %d.%m.%Y"),
+            'timestamp': datetime.now().strftime("%d.%m.%Y"),  # Только дата
             'updated_at': None,
             'status': 'active'
         }
@@ -384,10 +434,13 @@ def handle_callback(call):
         # Активируем чат покупателя
         active_chats[buyer_id] = order_id
         
+        # Сохраняем данные
+        save_data()
+        
         # Сообщение продавцу с двумя кнопками
         seller_message = (
             f"📦 *НОВЫЙ ЗАКАЗ #{order_id}*\n"
-            f"⏰ {datetime.now().strftime('%H:%M %d.%m.%Y')}\n\n"
+            f"📅 {datetime.now().strftime('%d.%m.%Y')}\n\n"  # Только дата
             f"👤 *Покупатель:* {buyer_name}\n"
             f"📍 *Точка:* {address}\n"
             f"📝 *Заказ:* {user_info['text']}\n\n"
@@ -500,10 +553,6 @@ def handle_seller_close_callback(call):
         final_order_text = order['order_text']
         order_date = order['updated_at'] if order['updated_at'] else order['timestamp']
         
-        # Удаляем все сообщения в чате покупателя, связанные с этим заказом
-        # (кроме финального, которое отправим сейчас)
-        buyer_chat_id = order['buyer_id']
-        
         # Отправляем финальное сообщение покупателю
         final_message = (
             f"✅ *Заказ от {order_date}*\n\n"
@@ -520,7 +569,7 @@ def handle_seller_close_callback(call):
         
         # Отправляем финальное сообщение
         bot.send_message(
-            buyer_chat_id,
+            order['buyer_id'],
             final_message,
             parse_mode="Markdown",
             reply_markup=user_keyboard
@@ -537,6 +586,9 @@ def handle_seller_close_callback(call):
         if seller_id in seller_waiting_for_order_update:
             del seller_waiting_for_order_update[seller_id]
         
+        # Сохраняем изменения
+        save_data()
+        
         # Обновляем сообщение у продавца
         try:
             bot.edit_message_text(
@@ -544,9 +596,9 @@ def handle_seller_close_callback(call):
                 f"👤 Покупатель: {order['buyer_name']}\n"
                 f"📍 Точка: {order['address']}\n"
                 f"📝 Заказ: {final_order_text}\n\n"
-                f"🕒 Создан: {order['timestamp']}\n"
-                f"🔄 Обновлен: {order['updated_at'] if order['updated_at'] else 'нет'}\n"
-                f"🏁 Завершен: {datetime.now().strftime('%H:%M %d.%m.%Y')}",
+                f"📅 Создан: {order['timestamp']}\n"  # Только дата
+                f"🔄 Обновлен: {order['updated_at'] if order['updated_at'] else 'нет'}\n"  # Только дата
+                f"🏁 Завершен: {datetime.now().strftime('%d.%m.%Y')}",  # Только дата
                 seller_id,
                 call.message.message_id,
                 parse_mode="Markdown"
@@ -559,9 +611,9 @@ def handle_seller_close_callback(call):
                 f"👤 Покупатель: {order['buyer_name']}\n"
                 f"📍 Точка: {order['address']}\n"
                 f"📝 Заказ: {final_order_text}\n\n"
-                f"🕒 Создан: {order['timestamp']}\n"
-                f"🔄 Обновлен: {order['updated_at'] if order['updated_at'] else 'нет'}\n"
-                f"🏁 Завершен: {datetime.now().strftime('%H:%M %d.%m.%Y')}",
+                f"📅 Создан: {order['timestamp']}\n"  # Только дата
+                f"🔄 Обновлен: {order['updated_at'] if order['updated_at'] else 'нет'}\n"  # Только дата
+                f"🏁 Завершен: {datetime.now().strftime('%d.%m.%Y')}",  # Только дата
                 parse_mode="Markdown"
             )
         
