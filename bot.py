@@ -1,4 +1,4 @@
- import os
+import os
 import telebot
 from flask import Flask, request
 from datetime import datetime
@@ -72,15 +72,32 @@ def load_data():
         loaded_orders = 0
         for order_id_str, order in data.get('active_orders', {}).items():
             order_id = int(order_id_str)
+            
+            # ПРЕОБРАЗУЕМ ВСЕ ID ИЗ СТРОК В ЧИСЛА
+            if 'order_id' in order:
+                order['order_id'] = int(order['order_id'])
+            if 'buyer_id' in order:
+                order['buyer_id'] = int(order['buyer_id'])
+            if 'seller_id' in order:
+                order['seller_id'] = int(order['seller_id'])
+            
             active_orders[order_id] = order
             loaded_orders += 1
             
             # Восстанавливаем активные чаты
-            if 'buyer_id' in order:
+            if 'buyer_id' in order and order['buyer_id']:
                 active_chats[order['buyer_id']] = order_id
+                print(f"🔄 Восстановлен чат: покупатель {order['buyer_id']} -> заказ #{order_id}")
         
         print(f"✅ Данные загружены: {loaded_orders} активных заказов")
         print(f"📊 Текущий счетчик заказов: {order_counter}")
+        print(f"💬 Активных чатов восстановлено: {len(active_chats)}")
+        
+        # Выводим список восстановленных заказов
+        if loaded_orders > 0:
+            print("📋 Активные заказы:")
+            for oid, ord in active_orders.items():
+                print(f"   #{oid}: {ord['buyer_name']} - {ord['order_text'][:30]}...")
         
     except Exception as e:
         print(f"❌ Ошибка загрузки данных: {e}")
@@ -88,7 +105,16 @@ def load_data():
 # Загружаем данные при старте
 load_data()
 
-# ФУНКЦИЯ ДЛЯ ПОЛУЧЕНИЯ ID ПРОДАВЦОВ
+# ПРОВЕРКА: Если есть активные заказы, покажем их в логах
+if active_orders:
+    print(f"\n🚀 БОТ ЗАПУЩЕН С {len(active_orders)} АКТИВНЫМИ ЗАКАЗАМИ:")
+    for order_id, order in active_orders.items():
+        print(f"   #{order_id}: {order['buyer_name']} - {order['order_text'][:50]}...")
+    print(f"💬 Активных чатов: {len(active_chats)}\n")
+else:
+    print("\n📭 Нет активных заказов\n")
+
+# ====== ФУНКЦИИ ДЛЯ ПОЛУЧЕНИЯ ID ПРОДАВЦОВ ======
 def get_seller_id(seller_name):
     """Получение ID продавца из переменных окружения"""
     env_vars = {
@@ -209,7 +235,7 @@ def handle_text(message):
                 # Обновляем заказ
                 old_order_text = order['order_text']
                 order['order_text'] = text
-                order['updated_at'] = datetime.now().strftime("%d.%m.%Y")  # Только дата
+                order['updated_at'] = datetime.now().strftime("%d.%m.%Y")
                 
                 # Сохраняем изменения
                 save_data()
@@ -425,7 +451,7 @@ def handle_callback(call):
             'seller_name': seller_name,
             'address': address,
             'order_text': user_info['text'],
-            'timestamp': datetime.now().strftime("%d.%m.%Y"),  # Только дата
+            'timestamp': datetime.now().strftime("%d.%m.%Y"),
             'updated_at': None,
             'status': 'active'
         }
@@ -440,7 +466,7 @@ def handle_callback(call):
         # Сообщение продавцу с двумя кнопками
         seller_message = (
             f"📦 *НОВЫЙ ЗАКАЗ #{order_id}*\n"
-            f"📅 {datetime.now().strftime('%d.%m.%Y')}\n\n"  # Только дата
+            f"📅 {datetime.now().strftime('%d.%m.%Y')}\n\n"
             f"👤 *Покупатель:* {buyer_name}\n"
             f"📍 *Точка:* {address}\n"
             f"📝 *Заказ:* {user_info['text']}\n\n"
@@ -596,9 +622,9 @@ def handle_seller_close_callback(call):
                 f"👤 Покупатель: {order['buyer_name']}\n"
                 f"📍 Точка: {order['address']}\n"
                 f"📝 Заказ: {final_order_text}\n\n"
-                f"📅 Создан: {order['timestamp']}\n"  # Только дата
-                f"🔄 Обновлен: {order['updated_at'] if order['updated_at'] else 'нет'}\n"  # Только дата
-                f"🏁 Завершен: {datetime.now().strftime('%d.%m.%Y')}",  # Только дата
+                f"📅 Создан: {order['timestamp']}\n"
+                f"🔄 Обновлен: {order['updated_at'] if order['updated_at'] else 'нет'}\n"
+                f"🏁 Завершен: {datetime.now().strftime('%d.%m.%Y')}",
                 seller_id,
                 call.message.message_id,
                 parse_mode="Markdown"
@@ -611,9 +637,9 @@ def handle_seller_close_callback(call):
                 f"👤 Покупатель: {order['buyer_name']}\n"
                 f"📍 Точка: {order['address']}\n"
                 f"📝 Заказ: {final_order_text}\n\n"
-                f"📅 Создан: {order['timestamp']}\n"  # Только дата
-                f"🔄 Обновлен: {order['updated_at'] if order['updated_at'] else 'нет'}\n"  # Только дата
-                f"🏁 Завершен: {datetime.now().strftime('%d.%m.%Y')}",  # Только дата
+                f"📅 Создан: {order['timestamp']}\n"
+                f"🔄 Обновлен: {order['updated_at'] if order['updated_at'] else 'нет'}\n"
+                f"🏁 Завершен: {datetime.now().strftime('%d.%m.%Y')}",
                 parse_mode="Markdown"
             )
         
