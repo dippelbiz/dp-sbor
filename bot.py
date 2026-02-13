@@ -79,6 +79,8 @@ def load_data():
         
         # Восстанавливаем активные заказы
         loaded_orders = 0
+        fixed_orders = 0  # Счетчик исправленных заказов
+        
         for order_id_str, order in data.get('active_orders', {}).items():
             order_id = int(order_id_str)
             
@@ -90,11 +92,20 @@ def load_data():
             if 'seller_id' in order:
                 order['seller_id'] = int(order['seller_id'])
             
-            # Добавляем поле для отслеживания отправки, если его нет
+            # ===== ВАЖНО: Добавляем поля для старых заказов =====
+            changed = False
             if 'sent_to_seller' not in order:
-                order['sent_to_seller'] = True  # По умолчанию считаем, что отправлено
+                order['sent_to_seller'] = True  # Старые заказы считаем доставленными
+                changed = True
+                print(f"🛠 Добавлено поле sent_to_seller для заказа #{order_id}")
+            
             if 'resend_count' not in order:
                 order['resend_count'] = 0
+                changed = True
+            
+            if changed:
+                fixed_orders += 1
+            # ==================================================
             
             active_orders[order_id] = order
             loaded_orders += 1
@@ -105,6 +116,8 @@ def load_data():
                 print(f"🔄 Восстановлен чат: покупатель {order['buyer_id']} -> заказ #{order_id}")
         
         print(f"✅ Данные загружены: {loaded_orders} активных заказов")
+        if fixed_orders > 0:
+            print(f"🛠 Исправлено старых заказов: {fixed_orders}")
         print(f"📊 Текущий счетчик заказов: {order_counter}")
         print(f"💬 Активных чатов восстановлено: {len(active_chats)}")
         
@@ -114,6 +127,11 @@ def load_data():
             for oid, ord in active_orders.items():
                 status = "✅" if ord.get('sent_to_seller', True) else "❌"
                 print(f"   {status} #{oid}: {ord['buyer_name']} - {ord['order_text'][:30]}...")
+        
+        # Сохраняем исправленные данные обратно в файл
+        if fixed_orders > 0:
+            save_data()
+            print(f"💾 Исправленные данные сохранены в {DATA_FILE}")
         
     except Exception as e:
         print(f"❌ Ошибка загрузки данных: {e}")
@@ -275,6 +293,38 @@ def resend_order_to_seller(order_id, admin_id=None):
     except Exception as e:
         error_msg = str(e)
         return {'success': False, 'error': error_msg[:100]}
+
+# ====== КОМАНДА ДЛЯ ВОССТАНОВЛЕНИЯ СТАРЫХ ЗАКАЗОВ ======
+@bot.message_handler(commands=['fix_orders'])
+def fix_old_orders(message):
+    """Команда для принудительного восстановления старых заказов"""
+    user_id = message.from_user.id
+    
+    if not is_admin(user_id):
+        bot.send_message(user_id, "❌ Нет прав")
+        return
+    
+    fixed = 0
+    for order_id, order in active_orders.items():
+        changed = False
+        if 'sent_to_seller' not in order:
+            order['sent_to_seller'] = True
+            changed = True
+        if 'resend_count' not in order:
+            order['resend_count'] = 0
+            changed = True
+        
+        if changed:
+            fixed += 1
+    
+    if fixed > 0:
+        save_data()
+        bot.send_message(
+            user_id, 
+            f"✅ Исправлено {fixed} старых заказов. Теперь они отображаются в админ-панели."
+        )
+    else:
+        bot.send_message(user_id, "✅ Все заказы уже в правильном формате.")
 
 # ====== НОВАЯ АДМИН-ПАНЕЛЬ С КНОПКОЙ "АКТИВНЫЕ ЗАКАЗЫ" ======
 @bot.message_handler(commands=['admin'])
