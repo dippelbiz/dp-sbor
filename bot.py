@@ -90,6 +90,12 @@ def load_data():
             if 'seller_id' in order:
                 order['seller_id'] = int(order['seller_id'])
             
+            # Добавляем поле для отслеживания отправки, если его нет
+            if 'sent_to_seller' not in order:
+                order['sent_to_seller'] = True  # По умолчанию считаем, что отправлено
+            if 'resend_count' not in order:
+                order['resend_count'] = 0
+            
             active_orders[order_id] = order
             loaded_orders += 1
             
@@ -106,7 +112,8 @@ def load_data():
         if loaded_orders > 0:
             print("📋 Активные заказы:")
             for oid, ord in active_orders.items():
-                print(f"   #{oid}: {ord['buyer_name']} - {ord['order_text'][:30]}...")
+                status = "✅" if ord.get('sent_to_seller', True) else "❌"
+                print(f"   {status} #{oid}: {ord['buyer_name']} - {ord['order_text'][:30]}...")
         
     except Exception as e:
         print(f"❌ Ошибка загрузки данных: {e}")
@@ -118,7 +125,8 @@ load_data()
 if active_orders:
     print(f"\n🚀 БОТ ЗАПУЩЕН С {len(active_orders)} АКТИВНЫМИ ЗАКАЗАМИ:")
     for order_id, order in active_orders.items():
-        print(f"   #{order_id}: {order['buyer_name']} - {order['order_text'][:50]}...")
+        status = "✅" if order.get('sent_to_seller', True) else "❌"
+        print(f"   {status} #{order_id}: {order['buyer_name']} - {order['order_text'][:50]}...")
     print(f"💬 Активных чатов: {len(active_chats)}\n")
 else:
     print("\n📭 Нет активных заказов\n")
@@ -205,25 +213,84 @@ def show_instruction_with_keyboard(chat_id):
         reply_markup=main_keyboard
     )
 
-# ====== КОМАНДЫ ДЛЯ АДМИНИСТРАТОРА ======
+# ====== ФУНКЦИЯ ПЕРЕОТПРАВКИ ЗАКАЗА ======
+def resend_order_to_seller(order_id, admin_id=None):
+    """
+    Переотправить заказ продавцу
+    Покупатель НЕ получает уведомлений
+    """
+    if order_id not in active_orders:
+        return {'success': False, 'error': 'Заказ не найден'}
+    
+    order = active_orders[order_id]
+    seller_id = order['seller_id']
+    seller_name = order['seller_name']
+    
+    # Формируем сообщение для продавца
+    resend_text = " (ПОВТОРНАЯ ОТПРАВКА)" if order.get('sent_to_seller', False) else ""
+    admin_text = "\n👑 Переотправлено администратором" if admin_id else ""
+    
+    seller_message = (
+        f"📦 *ЗАКАЗ #{order_id}{resend_text}*\n"
+        f"📅 {order['timestamp']}\n\n"
+        f"👤 *Покупатель:* {order['buyer_name']}\n"
+        f"📍 *Точка:* {order['address']}\n"
+        f"📝 *Заказ:* {order['order_text']}{admin_text}"
+    )
+    
+    # Клавиатура для продавца
+    seller_keyboard = telebot.types.InlineKeyboardMarkup()
+    seller_keyboard.row(
+        telebot.types.InlineKeyboardButton("✏️ Уточнить заказ", callback_data=f"seller_update_{order_id}"),
+        telebot.types.InlineKeyboardButton("✅ Завершить заказ", callback_data=f"seller_close_{order_id}")
+    )
+    
+    try:
+        # Отправляем только продавцу
+        bot.send_message(
+            seller_id, 
+            seller_message, 
+            parse_mode="Markdown", 
+            reply_markup=seller_keyboard
+        )
+        
+        # Обновляем статус заказа
+        order['sent_to_seller'] = True
+        order['last_resend'] = datetime.now().strftime("%d.%m.%Y %H:%M")
+        order['resend_count'] = order.get('resend_count', 0) + 1
+        
+        # Активируем чат с покупателем (если еще не активен)
+        if order['buyer_id'] not in active_chats:
+            active_chats[order['buyer_id']] = order_id
+        
+        # Сохраняем изменения
+        save_data()
+        
+        return {
+            'success': True, 
+            'seller_name': seller_name,
+            'order_id': order_id
+        }
+        
+    except Exception as e:
+        error_msg = str(e)
+        return {'success': False, 'error': error_msg[:100]}
+
+# ====== НОВАЯ АДМИН-ПАНЕЛЬ С КНОПКОЙ "АКТИВНЫЕ ЗАКАЗЫ" ======
 @bot.message_handler(commands=['admin'])
 def admin_panel(message):
-    """Панель администратора"""
+    """Панель администратора с постоянными кнопками"""
     user_id = message.from_user.id
     
     if not is_admin(user_id):
         bot.send_message(user_id, "❌ У вас нет прав администратора")
         return
     
-    keyboard = telebot.types.InlineKeyboardMarkup()
-    keyboard.row(
-        telebot.types.InlineKeyboardButton("📋 Все активные заказы", callback_data="admin_all_orders"),
-        telebot.types.InlineKeyboardButton("👥 Статистика", callback_data="admin_stats")
-    )
-    keyboard.row(
-        telebot.types.InlineKeyboardButton("🔍 Поиск по номеру заказа", callback_data="admin_search"),
-        telebot.types.InlineKeyboardButton("📊 Отчет по продавцам", callback_data="admin_sellers")
-    )
+    # Создаем Reply клавиатуру (постоянные кнопки)
+    keyboard = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True)
+    keyboard.row("📋 Активные заказы", "📊 Статистика")
+    keyboard.row("🔄 Переотправить заказ", "👥 По продавцам")
+    keyboard.row("🔍 Поиск по номеру", "🏠 Главное меню")
     
     bot.send_message(
         user_id,
@@ -233,6 +300,276 @@ def admin_panel(message):
         reply_markup=keyboard
     )
 
+@bot.message_handler(func=lambda message: message.text == "📋 Активные заказы")
+def show_active_orders(message):
+    """Показать все активные заказы"""
+    user_id = message.from_user.id
+    
+    if not is_admin(user_id):
+        return
+    
+    if not active_orders:
+        bot.send_message(user_id, "📭 Нет активных заказов")
+        return
+    
+    bot.send_message(user_id, f"📋 *Всего активных заказов: {len(active_orders)}*", parse_mode="Markdown")
+    
+    for order_id, order in sorted(active_orders.items()):
+        # Определяем статус доставки
+        sent_status = "✅" if order.get('sent_to_seller', True) else "❌"
+        resend_info = f" (переотправлен {order.get('resend_count', 0)} раз)" if order.get('resend_count', 0) > 0 else ""
+        
+        # Информация о заказе
+        order_info = (
+            f"{sent_status} *Заказ #{order_id}*{resend_info}\n"
+            f"📅 {order['timestamp']}\n"
+            f"👤 Продавец: {order['seller_name']}\n"
+            f"👤 Покупатель: {order['buyer_name']}\n"
+            f"📍 {order['address']}\n"
+            f"📝 {order['order_text']}\n"
+        )
+        
+        # Если заказ не дошел, добавляем предупреждение
+        if not order.get('sent_to_seller', True):
+            order_info += f"⚠️ *НЕ ДОСТАВЛЕН ПРОДАВЦУ!*\n"
+        
+        # Кнопка переотправки для каждого заказа
+        keyboard = telebot.types.InlineKeyboardMarkup()
+        keyboard.row(
+            telebot.types.InlineKeyboardButton(
+                "🔄 Переотправить продавцу", 
+                callback_data=f"admin_resend_{order_id}"
+            )
+        )
+        
+        bot.send_message(
+            user_id,
+            order_info,
+            parse_mode="Markdown",
+            reply_markup=keyboard
+        )
+
+@bot.message_handler(func=lambda message: message.text == "🔄 Переотправить заказ")
+def resend_order_prompt(message):
+    """Запрос номера заказа для переотправки"""
+    user_id = message.from_user.id
+    
+    if not is_admin(user_id):
+        return
+    
+    msg = bot.send_message(
+        user_id,
+        "🔍 Введите номер заказа для переотправки (например: 6):"
+    )
+    bot.register_next_step_handler(msg, process_resend_order)
+
+def process_resend_order(message):
+    """Обработка переотправки конкретного заказа"""
+    user_id = message.from_user.id
+    
+    if not is_admin(user_id):
+        return
+    
+    try:
+        order_id = int(message.text.strip())
+        
+        if order_id not in active_orders:
+            bot.send_message(user_id, f"❌ Заказ #{order_id} не найден")
+            return
+        
+        # Переотправляем заказ
+        result = resend_order_to_seller(order_id, admin_id=user_id)
+        
+        if result['success']:
+            order = active_orders[order_id]
+            bot.send_message(
+                user_id,
+                f"✅ Заказ #{order_id} переотправлен продавцу {result['seller_name']}\n"
+                f"📦 Товар: {order['order_text'][:100]}..."
+            )
+        else:
+            bot.send_message(
+                user_id,
+                f"❌ Ошибка: {result['error']}"
+            )
+            
+    except ValueError:
+        bot.send_message(user_id, "❌ Введите корректный номер заказа")
+
+@bot.message_handler(func=lambda message: message.text == "📊 Статистика")
+def admin_stats(message):
+    """Статистика для админа"""
+    user_id = message.from_user.id
+    
+    if not is_admin(user_id):
+        return
+    
+    # Считаем статистику
+    total_orders = len(active_orders)
+    delivered = sum(1 for o in active_orders.values() if o.get('sent_to_seller', False))
+    not_delivered = total_orders - delivered
+    total_resends = sum(o.get('resend_count', 0) for o in active_orders.values())
+    
+    # По продавцам
+    seller_stats = {}
+    for order in active_orders.values():
+        seller = order['seller_name']
+        if seller not in seller_stats:
+            seller_stats[seller] = {'total': 0, 'not_delivered': 0}
+        seller_stats[seller]['total'] += 1
+        if not order.get('sent_to_seller', False):
+            seller_stats[seller]['not_delivered'] += 1
+    
+    report = "📊 *СТАТИСТИКА*\n\n"
+    report += f"📦 Всего активных заказов: {total_orders}\n"
+    report += f"✅ Доставлено продавцам: {delivered}\n"
+    report += f"❌ Не доставлено: {not_delivered}\n"
+    report += f"🔄 Всего переотправок: {total_resends}\n\n"
+    
+    report += "*По продавцам:*\n"
+    for seller, stats in seller_stats.items():
+        report += f"• {seller}: {stats['total']} заказов"
+        if stats['not_delivered'] > 0:
+            report += f" (❌ {stats['not_delivered']} не доставлено)"
+        report += "\n"
+    
+    bot.send_message(user_id, report, parse_mode="Markdown")
+
+@bot.message_handler(func=lambda message: message.text == "👥 По продавцам")
+def sellers_list(message):
+    """Список продавцов с их заказами"""
+    user_id = message.from_user.id
+    
+    if not is_admin(user_id):
+        return
+    
+    for seller_name in pickup_points.values():
+        seller_id = get_seller_id(seller_name)
+        if seller_id:
+            seller_orders = get_seller_active_orders(seller_id)
+            
+            if seller_orders:
+                report = f"👤 *{seller_name}*\n"
+                report += f"📍 {pickup_points.get(seller_name)}\n"
+                report += f"📦 Заказов: {len(seller_orders)}\n"
+                
+                for order_id in seller_orders:
+                    order = active_orders[order_id]
+                    status = "✅" if order.get('sent_to_seller', True) else "❌"
+                    report += f"  {status} #{order_id}: {order['buyer_name']} - {order['order_text'][:30]}...\n"
+                
+                bot.send_message(user_id, report, parse_mode="Markdown")
+    
+    bot.send_message(user_id, "Для переотправки используйте /admin → Активные заказы")
+
+@bot.message_handler(func=lambda message: message.text == "🔍 Поиск по номеру")
+def search_prompt(message):
+    """Поиск заказа по номеру"""
+    user_id = message.from_user.id
+    
+    if not is_admin(user_id):
+        return
+    
+    msg = bot.send_message(
+        user_id,
+        "🔍 Введите номер заказа:"
+    )
+    bot.register_next_step_handler(msg, process_search)
+
+def process_search(message):
+    """Обработка поиска"""
+    user_id = message.from_user.id
+    
+    if not is_admin(user_id):
+        return
+    
+    try:
+        order_id = int(message.text.strip())
+        order = active_orders.get(order_id)
+        
+        if order:
+            status = "✅ доставлен" if order.get('sent_to_seller', True) else "❌ НЕ ДОСТАВЛЕН"
+            resend_info = f"\n🔄 Переотправлен: {order.get('resend_count', 0)} раз" if order.get('resend_count', 0) > 0 else ""
+            
+            order_info = (
+                f"🔍 *Заказ #{order_id}*\n\n"
+                f"📅 Создан: {order['timestamp']}\n"
+                f"👤 Продавец: {order['seller_name']}\n"
+                f"👤 Покупатель: {order['buyer_name']}\n"
+                f"📍 Адрес: {order['address']}\n"
+                f"📝 Заказ: {order['order_text']}\n"
+                f"📦 Статус: {status}{resend_info}\n"
+                f"💬 Чтобы ответить: `#{order_id} ваш_текст`"
+            )
+            
+            keyboard = telebot.types.InlineKeyboardMarkup()
+            keyboard.row(
+                telebot.types.InlineKeyboardButton(
+                    "🔄 Переотправить", 
+                    callback_data=f"admin_resend_{order_id}"
+                )
+            )
+            
+            bot.send_message(user_id, order_info, parse_mode="Markdown", reply_markup=keyboard)
+        else:
+            bot.send_message(user_id, f"❌ Заказ #{order_id} не найден")
+            
+    except ValueError:
+        bot.send_message(user_id, "❌ Введите корректный номер заказа")
+
+@bot.message_handler(func=lambda message: message.text == "🏠 Главное меню")
+def back_to_main(message):
+    """Возврат в главное меню"""
+    show_instruction_with_keyboard(message.chat.id)
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith('admin_resend_'))
+def admin_resend_callback(call):
+    """Переотправка заказа по кнопке"""
+    user_id = call.from_user.id
+    
+    if not is_admin(user_id):
+        bot.answer_callback_query(call.id, "❌ Нет прав")
+        return
+    
+    order_id = int(call.data.replace('admin_resend_', ''))
+    
+    # Переотправляем заказ
+    result = resend_order_to_seller(order_id, admin_id=user_id)
+    
+    if result['success']:
+        order = active_orders[order_id]
+        bot.answer_callback_query(
+            call.id, 
+            f"✅ Заказ #{order_id} переотправлен {result['seller_name']}"
+        )
+        
+        # Обновляем сообщение с заказом
+        sent_status = "✅" if order.get('sent_to_seller', True) else "❌"
+        resend_info = f" (переотправлен {order.get('resend_count', 0)} раз)" if order.get('resend_count', 0) > 0 else ""
+        
+        new_text = (
+            f"{sent_status} *Заказ #{order_id}*{resend_info}\n"
+            f"📅 {order['timestamp']}\n"
+            f"👤 Продавец: {order['seller_name']}\n"
+            f"👤 Покупатель: {order['buyer_name']}\n"
+            f"📍 {order['address']}\n"
+            f"📝 {order['order_text']}\n"
+            f"🔄 Переотправлено: {datetime.now().strftime('%H:%M %d.%m.%Y')}"
+        )
+        
+        try:
+            bot.edit_message_text(
+                new_text,
+                user_id,
+                call.message.message_id,
+                parse_mode="Markdown"
+            )
+        except:
+            pass
+    else:
+        bot.answer_callback_query(call.id, f"❌ {result['error']}")
+
+# ====== ОСТАЛЬНЫЕ КОМАНДЫ АДМИНА ======
 @bot.message_handler(commands=['stats'])
 def admin_stats_command(message):
     """Быстрая статистика"""
@@ -242,30 +579,7 @@ def admin_stats_command(message):
         bot.send_message(user_id, "❌ У вас нет прав администратора")
         return
     
-    show_admin_stats(user_id)
-
-def show_admin_stats(chat_id):
-    """Показать статистику"""
-    total_orders = len(active_orders)
-    total_chats = len(active_chats)
-    
-    # Статистика по продавцам
-    seller_stats = {}
-    for order_id, order in active_orders.items():
-        seller_name = order['seller_name']
-        if seller_name not in seller_stats:
-            seller_stats[seller_name] = 0
-        seller_stats[seller_name] += 1
-    
-    stats_text = "📊 *Статистика системы*\n\n"
-    stats_text += f"📦 Всего активных заказов: {total_orders}\n"
-    stats_text += f"💬 Активных чатов: {total_chats}\n\n"
-    stats_text += "*По продавцам:*\n"
-    
-    for seller, count in seller_stats.items():
-        stats_text += f"• {seller}: {count} заказов\n"
-    
-    bot.send_message(chat_id, stats_text, parse_mode="Markdown")
+    admin_stats(message)
 
 # ====== ОБРАБОТЧИКИ ======
 @bot.message_handler(commands=['start'])
@@ -305,8 +619,9 @@ def handle_text(message):
     user_id = message.from_user.id
     text = message.text.strip()
     
-    # Пропускаем команды, которые уже обработаны
-    if text in ['Каталог с ценами', 'О нас']:
+    # Пропускаем команды, которые уже обработаны админ-панелью
+    if text in ['📋 Активные заказы', '📊 Статистика', '🔄 Переотправить заказ', 
+                '👥 По продавцам', '🔍 Поиск по номеру', '🏠 Главное меню']:
         return
     
     # --- АДМИНИСТРАТОР ---
@@ -566,88 +881,6 @@ def handle_callback(call):
     chat_id = call.message.chat.id
     user_id = call.from_user.id
     
-    # ===== АДМИН КНОПКИ =====
-    if call.data == "admin_all_orders":
-        if not is_admin(user_id):
-            bot.answer_callback_query(call.id, "❌ Нет прав")
-            return
-        
-        if not active_orders:
-            bot.send_message(user_id, "📭 Нет активных заказов")
-            bot.answer_callback_query(call.id)
-            return
-        
-        for order_id, order in active_orders.items():
-            order_info = (
-                f"📦 *Заказ #{order_id}*\n"
-                f"📅 {order['timestamp']}\n"
-                f"👤 Продавец: {order['seller_name']}\n"
-                f"👤 Покупатель: {order['buyer_name']}\n"
-                f"📍 {order['address']}\n"
-                f"📝 {order['order_text']}\n\n"
-                f"💬 Чтобы ответить: `#{order_id} ваш_текст`"
-            )
-            
-            keyboard = telebot.types.InlineKeyboardMarkup()
-            keyboard.row(
-                telebot.types.InlineKeyboardButton("👀 Посмотреть чат", callback_data=f"admin_view_{order_id}")
-            )
-            
-            bot.send_message(user_id, order_info, parse_mode="Markdown", reply_markup=keyboard)
-        
-        bot.answer_callback_query(call.id)
-        return
-    
-    elif call.data == "admin_stats":
-        if not is_admin(user_id):
-            bot.answer_callback_query(call.id, "❌ Нет прав")
-            return
-        show_admin_stats(user_id)
-        bot.answer_callback_query(call.id)
-        return
-    
-    elif call.data == "admin_sellers":
-        if not is_admin(user_id):
-            bot.answer_callback_query(call.id, "❌ Нет прав")
-            return
-        
-        sellers_info = "👥 *Статистика по продавцам*\n\n"
-        for seller_name in pickup_points.values():
-            seller_id = get_seller_id(seller_name)
-            if seller_id:
-                orders_count = len(get_seller_active_orders(seller_id))
-                sellers_info += f"• {seller_name}: {orders_count} заказов\n"
-        
-        bot.send_message(user_id, sellers_info, parse_mode="Markdown")
-        bot.answer_callback_query(call.id)
-        return
-    
-    elif call.data == "admin_search":
-        if not is_admin(user_id):
-            bot.answer_callback_query(call.id, "❌ Нет прав")
-            return
-        bot.send_message(user_id, "🔍 Введите номер заказа в формате: /search 7")
-        bot.answer_callback_query(call.id)
-        return
-    
-    elif call.data.startswith('admin_view_'):
-        if not is_admin(user_id):
-            bot.answer_callback_query(call.id, "❌ Нет прав")
-            return
-        
-        order_id = int(call.data.split('_')[2])
-        order = active_orders.get(order_id)
-        
-        if order:
-            bot.send_message(
-                user_id,
-                f"🔍 *Заказ #{order_id}*\n\n"
-                f"Для ответа используйте: `#{order_id} ваш_текст`",
-                parse_mode="Markdown"
-            )
-        bot.answer_callback_query(call.id)
-        return
-    
     # ===== КНОПКА НОВОГО ЗАКАЗА =====
     if call.data == "NEW_ORDER":
         bot.answer_callback_query(call.id)
@@ -684,6 +917,32 @@ def handle_callback(call):
         order_counter += 1
         order_id = order_counter
         
+        # Сохраняем заказ с флагом отправки
+        sent_successfully = False
+        try:
+            # Пробуем отправить продавцу
+            seller_message = (
+                f"📦 *НОВЫЙ ЗАКАЗ #{order_id}*\n"
+                f"📅 {datetime.now().strftime('%d.%m.%Y')}\n\n"
+                f"👤 *Покупатель:* {buyer_name}\n"
+                f"📍 *Точка:* {address}\n"
+                f"📝 *Заказ:* {user_info['text']}\n\n"
+                f"🆔 ID покупателя: {buyer_id}"
+            )
+            
+            seller_keyboard = telebot.types.InlineKeyboardMarkup()
+            seller_keyboard.row(
+                telebot.types.InlineKeyboardButton("✏️ Уточнить заказ", callback_data=f"seller_update_{order_id}"),
+                telebot.types.InlineKeyboardButton("✅ Завершить заказ", callback_data=f"seller_close_{order_id}")
+            )
+            
+            bot.send_message(seller_id, seller_message, parse_mode="Markdown", reply_markup=seller_keyboard)
+            sent_successfully = True
+            
+        except Exception as e:
+            print(f"❌ Ошибка отправки продавцу {seller_name}: {e}")
+            sent_successfully = False
+        
         # Сохраняем заказ
         order_data = {
             'order_id': order_id,
@@ -695,7 +954,9 @@ def handle_callback(call):
             'order_text': user_info['text'],
             'timestamp': datetime.now().strftime("%d.%m.%Y"),
             'updated_at': None,
-            'status': 'active'
+            'status': 'active',
+            'sent_to_seller': sent_successfully,  # Важно! Отмечаем, дошел ли заказ
+            'resend_count': 0
         }
         active_orders[order_id] = order_data
         
@@ -704,48 +965,6 @@ def handle_callback(call):
         
         # Сохраняем данные
         save_data()
-        
-        # Сообщение продавцу
-        seller_message = (
-            f"📦 *НОВЫЙ ЗАКАЗ #{order_id}*\n"
-            f"📅 {datetime.now().strftime('%d.%m.%Y')}\n\n"
-            f"👤 *Покупатель:* {buyer_name}\n"
-            f"📍 *Точка:* {address}\n"
-            f"📝 *Заказ:* {user_info['text']}\n\n"
-            f"🆔 ID покупателя: {buyer_id}"
-        )
-        
-        seller_keyboard = telebot.types.InlineKeyboardMarkup()
-        seller_keyboard.row(
-            telebot.types.InlineKeyboardButton("✏️ Уточнить заказ", callback_data=f"seller_update_{order_id}"),
-            telebot.types.InlineKeyboardButton("✅ Завершить заказ", callback_data=f"seller_close_{order_id}")
-        )
-        
-        seller_active_orders = get_seller_active_orders(seller_id)
-        if len(seller_active_orders) > 1:
-            seller_message += f"\n\n📋 *Ваши активные заказы:* {', '.join([f'#{oid}' for oid in seller_active_orders])}"
-        
-        seller_message += "\n\n💬 *Чтобы ответить покупателю, напишите:*\n`#" + str(order_id) + " ваш_текст`"
-        
-        try:
-            bot.send_message(seller_id, seller_message, parse_mode="Markdown", reply_markup=seller_keyboard)
-            success = True
-            
-            # Уведомляем админа о новом заказе
-            if ADMIN_ID:
-                bot.send_message(
-                    ADMIN_ID,
-                    f"👑 *НОВЫЙ ЗАКАЗ #{order_id}*\n\n"
-                    f"👤 Продавец: {seller_name}\n"
-                    f"👤 Покупатель: {buyer_name}\n"
-                    f"📍 {address}\n"
-                    f"📝 {user_info['text']}",
-                    parse_mode="Markdown"
-                )
-                
-        except Exception as e:
-            print(f"❌ Ошибка отправки продавцу {seller_name}: {e}")
-            success = False
         
         # Удаляем сообщение с кнопками выбора адреса
         try:
@@ -761,53 +980,26 @@ def handle_callback(call):
             f"*Менеджер скоро свяжется с Вами в этом чате.*"
         )
         
-        if success:
+        bot.send_message(chat_id, buyer_message, parse_mode="Markdown")
+        
+        # Уведомляем админа о новом заказе
+        if ADMIN_ID:
+            status_text = "✅" if sent_successfully else "❌ НЕ ДОСТАВЛЕН"
             bot.send_message(
-                chat_id,
-                buyer_message,
+                ADMIN_ID,
+                f"👑 *НОВЫЙ ЗАКАЗ #{order_id}*\n\n"
+                f"👤 Продавец: {seller_name}\n"
+                f"👤 Покупатель: {buyer_name}\n"
+                f"📍 {address}\n"
+                f"📝 {user_info['text']}\n\n"
+                f"📦 Статус: {status_text}",
                 parse_mode="Markdown"
             )
-            bot.answer_callback_query(call.id, f"✅ Заказ #{order_id} отправлен менеджеру")
-        else:
-            bot.send_message(
-                chat_id,
-                f"⚠️ Заказ принят, но продавец пока не получил уведомление."
-            )
-            bot.answer_callback_query(call.id, "⚠️ Задержка с уведомлением")
+        
+        bot.answer_callback_query(call.id, f"✅ Заказ #{order_id} создан")
     else:
         bot.answer_callback_query(call.id, "❌ Ошибка: точка временно недоступна")
         print(f"❌ Не удалось получить ID продавца для {seller_name}")
-
-@bot.message_handler(commands=['search'])
-def search_order(message):
-    """Поиск заказа по номеру (для админа)"""
-    user_id = message.from_user.id
-    
-    if not is_admin(user_id):
-        bot.send_message(user_id, "❌ У вас нет прав администратора")
-        return
-    
-    try:
-        order_id = int(message.text.split()[1])
-        order = active_orders.get(order_id)
-        
-        if order:
-            order_info = (
-                f"🔍 *Заказ #{order_id}*\n\n"
-                f"📅 Создан: {order['timestamp']}\n"
-                f"👤 Продавец: {order['seller_name']}\n"
-                f"👤 Покупатель: {order['buyer_name']}\n"
-                f"📍 Адрес: {order['address']}\n"
-                f"📝 Заказ: {order['order_text']}\n"
-                f"🔄 Обновлен: {order['updated_at'] if order['updated_at'] else 'нет'}\n\n"
-                f"💬 Чтобы ответить: `#{order_id} ваш_текст`"
-            )
-            bot.send_message(user_id, order_info, parse_mode="Markdown")
-        else:
-            bot.send_message(user_id, f"❌ Заказ #{order_id} не найден")
-            
-    except (IndexError, ValueError):
-        bot.send_message(user_id, "❌ Используйте: /search 7")
 
 def handle_seller_update_callback(call):
     """Обработка кнопки 'Уточнить заказ'"""
@@ -958,4 +1150,3 @@ if __name__ == '__main__':
     
     port = int(os.environ.get('PORT', 10000))
     app.run(host='0.0.0.0', port=port, debug=False)
-
