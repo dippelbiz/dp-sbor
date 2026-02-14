@@ -85,29 +85,68 @@ def get_backup_filename():
     timestamp = get_current_time().strftime("%Y%m%d_%H%M%S")
     return f"{BACKUP_DIR}/backup_{timestamp}.json"
 
-def create_backup():
-    """Создание полного бэкапа всех данных"""
+def send_backup_to_admin(backup_type="автоматический"):
+    """Создание и отправка бэкапа админу"""
+    if not ADMIN_ID:
+        print("⚠️ ADMIN_ID не установлен, бэкап не отправлен")
+        return False
+    
     create_backup_dir()
     
-    backup_data = {
-        'timestamp': get_current_time_str(),
-        'seller_counters': seller_counters,
-        'active_orders': active_orders,
-        'archive_orders': archive_orders,
-        'chat_history': chat_history,
-        'active_chats': active_chats
-    }
-    
-    backup_file = get_backup_filename()
-    
     try:
-        with open(backup_file, 'w', encoding='utf-8') as f:
+        print(f"🔍 Начинаю создание {backup_type} бэкапа...")
+        
+        backup_data = {
+            'timestamp': get_current_time_str(),
+            'seller_counters': seller_counters,
+            'active_orders': active_orders,
+            'archive_orders': archive_orders,
+            'chat_history': chat_history,
+            'active_chats': active_chats
+        }
+        
+        # Генерируем имя файла
+        timestamp = get_current_time().strftime("%Y%m%d_%H%M%S")
+        filename = f"backup_{timestamp}.json"
+        filepath = os.path.join(BACKUP_DIR, filename)
+        print(f"📁 Путь к файлу: {filepath}")
+        
+        # Сохраняем временный файл
+        with open(filepath, 'w', encoding='utf-8') as f:
             json.dump(backup_data, f, ensure_ascii=False, indent=2)
-        print(f"💾 Бэкап создан: {backup_file}")
-        return backup_file
+        print(f"💾 Файл сохранен")
+        
+        # Проверяем размер файла
+        file_size = os.path.getsize(filepath)
+        print(f"📊 Размер файла: {file_size} байт")
+        
+        # Отправляем файл админу
+        with open(filepath, 'rb') as f:
+            print(f"📤 Отправляю файл админу {ADMIN_ID}...")
+            result = bot.send_document(
+                ADMIN_ID,
+                f,
+                caption=f"💾 *{backup_type} бэкап*\n\n"
+                       f"📅 {get_current_time_str()}\n"
+                       f"📦 Активных заказов: {len(active_orders)}\n"
+                       f"📚 Завершенных заказов: {len(archive_orders)}\n"
+                       f"💬 Чатов в истории: {len(chat_history)}",
+                parse_mode="Markdown"
+            )
+            print(f"✅ Файл отправлен, message_id: {result.message_id}")
+        
+        # Удаляем временный файл
+        os.remove(filepath)
+        print(f"🗑 Временный файл удален")
+        
+        print(f"✅ Бэкап успешно отправлен админу: {filename}")
+        return True
+        
     except Exception as e:
-        print(f"❌ Ошибка создания бэкапа: {e}")
-        return None
+        print(f"❌ ОШИБКА отправки бэкапа: {type(e).__name__}: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return False
 
 def restore_from_backup(backup_file):
     """Восстановление данных из бэкапа"""
@@ -440,15 +479,20 @@ def get_chat_history_text(order_id):
     
     return history_text
 
-def show_instruction_with_keyboard(chat_id):
-    """Показать инструкцию с клавиатурой"""
+def show_main_keyboard(chat_id):
+    """Показать главную клавиатуру с 4 кнопками"""
     main_keyboard = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True)
-    main_keyboard.add('Каталог с ценами')
-    main_keyboard.add('О нас')
-    main_keyboard.add('Связь с Админом')
+    main_keyboard.add('📦 Сделать заказ')
+    main_keyboard.add('📋 Каталог с ценами')
+    main_keyboard.add('🏢 О нас')
+    main_keyboard.add('👑 Связь с Админом')
     
+    return main_keyboard
+
+def show_instruction(chat_id):
+    """Показать инструкцию по оформлению заказа"""
     instruction_text = (
-        "🟢 *Пошаговая инструкция:*\n\n"
+        "🟢 *Как оформить заказ:*\n\n"
         "1. Напишите, что хотите заказать\n"
         "2. Выберите откуда удобнее забрать\n"
         "3. Менеджер свяжется с вами"
@@ -457,8 +501,7 @@ def show_instruction_with_keyboard(chat_id):
     bot.send_message(
         chat_id,
         instruction_text,
-        parse_mode="Markdown",
-        reply_markup=main_keyboard
+        parse_mode="Markdown"
     )
 
 # ====== КОМАНДЫ ДЛЯ АДМИНИСТРАТОРА ======
@@ -599,9 +642,8 @@ def force_complete_order(admin_id, order_id):
         save_data()
         save_archive()
         
-        # Создаем бэкап при завершении заказа
-        create_backup()
-        cleanup_old_backups()
+        # Создаем и отправляем бэкап при завершении заказа
+        send_backup_to_admin("📦 Заказ завершен админом")
         
         bot.send_message(admin_id, f"✅ Заказ #{order_id} принудительно завершен")
         return True
@@ -613,7 +655,83 @@ def force_complete_order(admin_id, order_id):
 # ====== ОБРАБОТЧИКИ ======
 @bot.message_handler(commands=['start'])
 def send_welcome(message):
-    show_instruction_with_keyboard(message.chat.id)
+    """Отправка приветствия и главного меню"""
+    keyboard = show_main_keyboard(message.chat.id)
+    
+    welcome_text = (
+        "👋 *Добро пожаловать в DP SBOR!*\n\n"
+        "Мы поможем вам выбрать и заказать лучшие орехи и сухофрукты.\n\n"
+        "Используйте кнопки ниже для навигации:"
+    )
+    
+    bot.send_message(
+        message.chat.id,
+        welcome_text,
+        parse_mode="Markdown",
+        reply_markup=keyboard
+    )
+
+@bot.message_handler(func=lambda message: message.text == '📦 Сделать заказ')
+def new_order(message):
+    """Начало оформления нового заказа"""
+    show_instruction(message.chat.id)
+
+@bot.message_handler(func=lambda message: message.text == '📋 Каталог с ценами')
+def send_catalog(message):
+    """Отправка каталога"""
+    catalog_text = (
+        "📋 *Каталог с ценами*\n\n"
+        "1. *Грецкий орех очищенный*, 500г - 400 ₽\n"
+        "2. *Миндаль золотой*, 1000г - 950 ₽\n"
+        "3. *Кешью WW320*, 1000г - 1000 ₽\n"
+        "4. *Манго сушеное*, 500г - 250 ₽\n"
+        "5. *Клубника сушеная*, 500г - 350 ₽\n\n"
+        "Для заказа нажмите 📦 Сделать заказ"
+    )
+    bot.send_message(message.chat.id, catalog_text, parse_mode="Markdown")
+
+@bot.message_handler(func=lambda message: message.text == '🏢 О нас')
+def send_about(message):
+    """Информация о компании"""
+    about_text = (
+        "🏢 *О нашей компании*\n\n"
+        "*DP SBOR | Отборные орехи и сухофрукты • Новосибирск*\n"
+        "Мы выбираем продукты по качеству, вкусу и внешнему виду, а не по минимальной цене\n\n"
+        "Всё, начиная от выбора товара, заканчивая фасовкой и упаковкой проходит жесткий контроль\n\n"
+        "*Вы гарантированно получаете высшее качество по шикарным ценам*\n\n"
+        "📍 На данный момент есть 5 точек *в Новосибирске*, где можно забрать заказ\n\n"
+        "*Наш канал: t.me/dp_sbor *"
+    )
+    bot.send_message(message.chat.id, about_text, parse_mode="Markdown")
+
+@bot.message_handler(func=lambda message: message.text == '👑 Связь с Админом')
+def contact_admin(message):
+    """Обработка кнопки связи с админом"""
+    admin_contact_text = (
+        "👑 *Связь с администратором*\n\n"
+        "Для связи с администратором нажмите кнопку ниже:"
+    )
+    
+    # Создаем кнопку для перехода в личные сообщения с админом
+    keyboard = telebot.types.InlineKeyboardMarkup()
+    if ADMIN_ID:
+        admin_link = f"tg://user?id={ADMIN_ID}"
+        keyboard.add(telebot.types.InlineKeyboardButton(
+            text="📩 Написать администратору", 
+            url=admin_link
+        ))
+    else:
+        keyboard.add(telebot.types.InlineKeyboardButton(
+            text="❌ Администратор не доступен", 
+            callback_data="admin_unavailable"
+        ))
+    
+    bot.send_message(
+        message.chat.id,
+        admin_contact_text,
+        parse_mode="Markdown",
+        reply_markup=keyboard
+    )
 
 @bot.message_handler(content_types=['document'])
 def handle_document(message):
@@ -668,66 +786,6 @@ def handle_document(message):
             f"❌ Ошибка при обработке файла: {str(e)[:100]}"
         )
         print(f"❌ Ошибка обработки бэкапа: {e}")
-
-@bot.message_handler(func=lambda message: message.text == 'Каталог с ценами')
-def send_catalog(message):
-    catalog_text = (
-        "📋 *Каталог с ценами*\n\n"
-         " *Орехи*\n\n"
-        "*Фисташки иранские отборные*, 500г - 600 ₽\n"
-        "*Грецкий орех очищенный*, 500г - 400 ₽\n"
-        "*Миндаль золотой*, 1000г - 950 ₽\n"
-        "*Кешью WW320*, 1000г - 1000 ₽\n\n"
-        " *Сухофрукты *\n\n"
-        "*Манго сушеное без сахара*, 500г - 250 ₽\n"
-        "*Клубника сушеная*, 500г- 350 ₽\n"
-        "*Папайя сушеная без сахара*, 500г - 350 ₽\n\n"
-        "*Для заказа напишите что Вам нужно*"
-    )
-    bot.send_message(message.chat.id, catalog_text, parse_mode="Markdown")
-    show_instruction_with_keyboard(message.chat.id)
-
-@bot.message_handler(func=lambda message: message.text == 'О нас')
-def send_about(message):
-    about_text = (
-        "🏢 *О нашей компании*\n\n"
-        "*DP SBOR | Отборные орехи и сухофрукты • Новосибирск*\n"
-        "Мы выбираем продукты по качеству, вкусу и внешнему виду, а не по минимальной цене\n\n"
-        "Всё, начиная от выбора товара, заканчивая фасовкой и упаковкой проходит жесткий контроль\n\n"
-        "*Вы гарантированно получаете высшее качество по шикарным ценам*\n\n"
-        "📍 На данный момент есть 5 точек *в Новосибирске*, где можно забрать заказ\n\n"
-        "*Наш канал: t.me/dp_sbor *"
-    )
-    bot.send_message(message.chat.id, about_text, parse_mode="Markdown")
-
-@bot.message_handler(func=lambda message: message.text == 'Связь с Админом')
-def contact_admin(message):
-    """Обработка кнопки связи с админом"""
-    admin_contact_text = (
-        "👑 *Связь с администратором*\n\n"
-        "Для связи с администратором нажмите кнопку ниже:"
-    )
-    
-    # Создаем кнопку для перехода в личные сообщения с админом
-    keyboard = telebot.types.InlineKeyboardMarkup()
-    if ADMIN_ID:
-        admin_link = f"tg://user?id={ADMIN_ID}"
-        keyboard.add(telebot.types.InlineKeyboardButton(
-            text="📩 Написать администратору", 
-            url=admin_link
-        ))
-    else:
-        keyboard.add(telebot.types.InlineKeyboardButton(
-            text="❌ Администратор не доступен", 
-            callback_data="admin_unavailable"
-        ))
-    
-    bot.send_message(
-        message.chat.id,
-        admin_contact_text,
-        parse_mode="Markdown",
-        reply_markup=keyboard
-    )
 
 @bot.callback_query_handler(func=lambda call: True)
 def handle_callback(call):
@@ -869,22 +927,17 @@ def handle_callback(call):
             return
         
         bot.edit_message_text(
-            "⏳ Создаю бэкап...",
+            "⏳ Создаю и отправляю бэкап...",
             user_id,
             call.message.message_id,
             parse_mode="Markdown"
         )
         
-        backup_file = create_backup()
-        cleanup_old_backups()
+        success = send_backup_to_admin("🔄 Ручной")
         
-        if backup_file:
+        if success:
             bot.edit_message_text(
-                f"✅ Бэкап успешно создан!\n\n"
-                f"📁 Файл: {backup_file}\n"
-                f"📦 Активных заказов: {len(active_orders)}\n"
-                f"📚 Завершенных заказов: {len(archive_orders)}\n"
-                f"💬 Чатов в истории: {len(chat_history)}",
+                "✅ Бэкап успешно создан и отправлен в чат!",
                 user_id,
                 call.message.message_id,
                 parse_mode="Markdown"
@@ -1059,16 +1112,12 @@ def handle_callback(call):
     
     elif call.data == "admin_unavailable":
         bot.answer_callback_query(call.id, "❌ Администратор временно недоступен")
-        bot.send_message(
-            call.message.chat.id,
-            "⚠️ Администратор временно недоступен. Пожалуйста, попробуйте позже или напишите менеджеру на точке."
-        )
         return
     
     # ===== КНОПКА НОВОГО ЗАКАЗА =====
     if call.data == "NEW_ORDER":
         bot.answer_callback_query(call.id)
-        show_instruction_with_keyboard(chat_id)
+        show_instruction(chat_id)
         return
     
     # ===== КНОПКИ ПРОДАВЦА =====
@@ -1136,9 +1185,8 @@ def handle_callback(call):
         # Сохраняем данные
         save_data()
         
-        # Создаем бэкап при новом заказе
-        create_backup()
-        cleanup_old_backups()
+        # Создаем и отправляем бэкап при новом заказе
+        send_backup_to_admin("🆕 Новый заказ")
         
         # Сообщение продавцу
         seller_message = (
@@ -1268,7 +1316,7 @@ def handle_text(message):
     text = message.text.strip()
     
     # Пропускаем команды, которые уже обработаны
-    if text in ['Каталог с ценами', 'О нас', 'Связь с Админом']:
+    if text in ['📦 Сделать заказ', '📋 Каталог с ценами', '🏢 О нас', '👑 Связь с Админом']:
         return
     
     # --- АДМИНИСТРАТОР ---
@@ -1475,7 +1523,7 @@ def handle_text(message):
         return
     
     # --- ПОКУПАТЕЛЬ ---
-    # Проверяем, ведет ли покупатель активный чат
+    # Проверяем, есть ли активный чат
     if user_id in active_chats:
         order_id = active_chats[user_id]
         order = active_orders.get(order_id)
@@ -1539,15 +1587,7 @@ def handle_text(message):
                 save_data()
     
     # --- НОВЫЙ ЗАКАЗ ОТ ПОКУПАТЕЛЯ ---
-    # Проверяем, нет ли у покупателя активного заказа
-    if user_id in active_chats:
-        bot.send_message(
-            user_id,
-            "⚠️ У вас уже есть активный заказ. Дождитесь завершения текущего заказа."
-        )
-        return
-    
-    # Сохраняем данные
+    # Сохраняем данные и показываем кнопки выбора адреса
     user_data[user_id] = {
         'text': text,
         'name': message.from_user.first_name or "Покупатель",
@@ -1672,9 +1712,8 @@ def handle_seller_close_callback(call):
         save_data()
         save_archive()
         
-        # Создаем бэкап при завершении заказа
-        create_backup()
-        cleanup_old_backups()
+        # Создаем и отправляем бэкап при завершении заказа
+        send_backup_to_admin("✅ Заказ завершен")
         
         # Обновляем сообщение у продавца
         try:
@@ -1739,6 +1778,3 @@ if __name__ == '__main__':
     
     port = int(os.environ.get('PORT', 10000))
     app.run(host='0.0.0.0', port=port, debug=False)
-
-
-
