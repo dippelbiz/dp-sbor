@@ -1,12 +1,48 @@
 import os
 import telebot
 from flask import Flask, request
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import json
 import time
 import threading
 from collections import defaultdict
 import shutil
+
+# ====== НАСТРОЙКИ ЧАСОВОГО ПОЯСА ======
+# МСК время (UTC+3) -> Новосибирск (UTC+7)
+MSK_OFFSET = 3
+NOVOSIBIRSK_OFFSET = 7
+TOTAL_OFFSET = NOVOSIBIRSK_OFFSET - MSK_OFFSET  # +4 часа к серверному времени
+
+def get_novosibirsk_time():
+    """Возвращает текущее время в Новосибирске (UTC+7)"""
+    utc_time = datetime.now(timezone.utc)
+    novosibirsk_time = utc_time + timedelta(hours=NOVOSIBIRSK_OFFSET)
+    return novosibirsk_time
+
+def format_time(dt=None):
+    """Форматирует время в локальный формат"""
+    if dt is None:
+        dt = get_novosibirsk_time()
+    if isinstance(dt, str):
+        return dt
+    return dt.strftime("%d.%m.%Y %H:%M")
+
+def format_date(dt=None):
+    """Форматирует только дату"""
+    if dt is None:
+        dt = get_novosibirsk_time()
+    if isinstance(dt, str):
+        return dt
+    return dt.strftime("%d.%m.%Y")
+
+def format_time_only(dt=None):
+    """Форматирует только время"""
+    if dt is None:
+        dt = get_novosibirsk_time()
+    if isinstance(dt, str):
+        return dt
+    return dt.strftime("%H:%M")
 
 # ====== НАСТРОЙКИ ======
 TOKEN = os.environ.get('BOT_TOKEN')
@@ -148,7 +184,7 @@ def move_to_completed(seller_name, order_number):
     """Перемещает заказ из активных в завершенные"""
     if seller_name in active_orders and order_number in active_orders[seller_name]:
         order = active_orders[seller_name].pop(order_number)
-        order['completed_at'] = datetime.now().strftime("%d.%m.%Y %H:%M")
+        order['completed_at'] = format_time()
         
         if seller_name not in completed_orders:
             completed_orders[seller_name] = {}
@@ -187,7 +223,7 @@ def create_backup(backup_type="Авто"):
     
     try:
         if os.path.exists(DATA_FILE):
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            timestamp = get_novosibirsk_time().strftime("%Y%m%d_%H%M%S")
             backup_name = f"backup_{timestamp}.json"
             
             # Копируем файл
@@ -197,7 +233,7 @@ def create_backup(backup_type="Авто"):
                 bot.send_document(
                     ADMIN_ID,
                     f,
-                    caption=f"💾 {backup_type} бэкап {datetime.now().strftime('%d.%m.%Y %H:%M')}"
+                    caption=f"💾 {backup_type} бэкап {format_time()}"
                 )
             
             # Удаляем временную копию
@@ -461,14 +497,14 @@ def process_admin_message(message):
             'user_name': message.from_user.first_name or "Покупатель",
             'messages': [],
             'completed': False,
-            'created_at': datetime.now().strftime("%d.%m.%Y %H:%M")
+            'created_at': format_time()
         }
     
     # Добавляем сообщение
     admin_chats[user_id]['messages'].append({
         'sender': 'user',
         'text': message.text,
-        'time': datetime.now().strftime("%H:%M")
+        'time': format_time_only()
     })
     admin_chats[user_id]['completed'] = False
     
@@ -481,16 +517,18 @@ def process_admin_message(message):
     except:
         pass
     
-    # Отправляем подтверждение
+    # Отправляем подтверждение с обновленным дизайном
     confirm_text = (
         "✅ Сообщение отправлено администратору!\n\n"
-        "Напишите новое сообщение или вернитесь к оформлению заказа.\n"
-        "Не переживайте, Вы в любой момент можете вернуться к диалогу с администратором, "
-        "просто нажмите в меню кнопку \"👤 Связь с админом\""
+        "━━━━━━━━━━━━━━━━━━━━━━\n"
+        "Вы в любой момент можете вернуться к диалогу.\n"
+        "Просто нажмите в меню кнопку \"👤 Связь с админом\"\n"
+        "━━━━━━━━━━━━━━━━━━━━━━"
     )
     
     keyboard = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True)
-    keyboard.row('🔄 Вернуться к оформлению заказа')
+    keyboard.row('📝 Написать сообщение администратору')
+    keyboard.row('🔄 Вернуться к оформлению заказа (меню)')
     
     sent_msg = bot.send_message(
         user_id,
@@ -506,7 +544,7 @@ def process_admin_message(message):
             f"📩 *НОВОЕ СООБЩЕНИЕ #{admin_chats[user_id]['chat_id']}*\n"
             f"👤 {admin_chats[user_id]['user_name']}\n"
             f"💬 [Связаться с покупателем]({buyer_link})\n"
-            f"📅 {datetime.now().strftime('%d.%m.%Y %H:%M')}\n\n"
+            f"📅 {format_time()}\n\n"
             f"*Текст:*\n{message.text}"
         )
         
@@ -520,6 +558,15 @@ def process_admin_message(message):
         
         # Создаем бэкап при новом сообщении
         create_backup("По сообщению")
+
+@bot.message_handler(func=lambda message: message.text == '📝 Написать сообщение администратору')
+def write_to_admin(message):
+    user_id = message.from_user.id
+    contact_admin(message)
+
+@bot.message_handler(func=lambda message: message.text == '🔄 Вернуться к оформлению заказа (меню)')
+def back_to_order_menu(message):
+    show_instruction_with_keyboard(message.chat.id)
 
 @bot.message_handler(func=lambda message: message.text == '🔄 Вернуться к оформлению заказа')
 def back_to_order(message):
@@ -694,7 +741,7 @@ def admin_statistics(message):
     
     # Динамика за последние 7 дней
     report += "\n📈 *ДИНАМИКА ЗА НЕДЕЛЮ:*\n"
-    today = datetime.now()
+    today = get_novosibirsk_time()
     for i in range(6, -1, -1):
         date = today - timedelta(days=i)
         date_str = date.strftime("%d.%m")
@@ -837,7 +884,8 @@ def handle_text(message):
         '📋 Каталог с ценами', 'ℹ️ О нас', '📋 Мои заказы', '👤 Связаться с админом',
         '🔄 Вернуться к оформлению заказа', '📋 Активные заказы', '❌ Проблемные заказы',
         '📦 Завершенные заказы', '📊 Статистика', '💾 Создать бэкап', '📤 Восстановить из бэкапа',
-        '📬 Новые сообщения', '🏠 Главное меню'
+        '📬 Новые сообщения', '🏠 Главное меню', '📝 Написать сообщение администратору',
+        '🔄 Вернуться к оформлению заказа (меню)'
     ]
     if text in menu_commands:
         return
@@ -909,7 +957,7 @@ def handle_text(message):
                 order = active_orders[seller_name_wait][order_num]
                 old_text = order['order_text']
                 order['order_text'] = text
-                order['updated_at'] = datetime.now().strftime("%d.%m.%Y")
+                order['updated_at'] = format_date()
                 order['delivered_to_seller'] = True
                 
                 save_data()
@@ -1231,7 +1279,7 @@ def handle_callback(call):
                 'seller_name': seller_name,
                 'address': old_order['address'],
                 'order_text': old_order['order_text'],
-                'timestamp': datetime.now().strftime("%d.%m.%Y"),
+                'timestamp': format_date(),
                 'updated_at': None,
                 'status': 'active',
                 'delivered_to_seller': False,
@@ -1266,13 +1314,26 @@ def handle_callback(call):
                 
                 save_data()
             
-            # Уведомляем покупателя
-            bot.send_message(
-                user_id,
+            # Уведомляем покупателя с обновленным дизайном
+            buyer_msg = (
                 f"✅ *Заказ повторен!*\n\n"
                 f"📍 Адрес: {old_order['address']}\n"
                 f"📝 Ваш заказ: {old_order['order_text']}\n\n"
-                f"Менеджер скоро свяжется с вами."
+                f"━━━━━━━━━━━━━━━━━━━━━━\n"
+                f"Вы в любой момент можете вернуться к диалогу.\n"
+                f"Просто нажмите в меню кнопку \"👤 Связь с админом\"\n"
+                f"━━━━━━━━━━━━━━━━━━━━━━"
+            )
+            
+            buyer_keyboard = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True)
+            buyer_keyboard.row('📝 Написать сообщение администратору')
+            buyer_keyboard.row('🔄 Вернуться к оформлению заказа (меню)')
+            
+            bot.send_message(
+                user_id,
+                buyer_msg,
+                parse_mode="Markdown",
+                reply_markup=buyer_keyboard
             )
             
             # Создаем бэкап
@@ -1516,7 +1577,7 @@ def handle_callback(call):
             
             order = active_orders[seller_name][order_num]
             
-            # Финальное сообщение покупателю
+            # Финальное сообщение покупателю с обновленным дизайном
             final_message = (
                 f"✅ *Заказ от {order['timestamp']}*\n\n"
                 f"📝 *Содержание:* {order['order_text']}\n"
@@ -1633,7 +1694,7 @@ def handle_callback(call):
                 'seller_name': seller_name,
                 'address': address,
                 'order_text': user_info['text'],
-                'timestamp': datetime.now().strftime("%d.%m.%Y"),
+                'timestamp': format_date(),
                 'updated_at': None,
                 'status': 'active',
                 'delivered_to_seller': False,
@@ -1691,13 +1752,27 @@ def handle_callback(call):
             except:
                 pass
             
-            # Сообщение покупателю
-            bot.send_message(
-                user_id,
+            # Сообщение покупателю с обновленным дизайном
+            buyer_msg = (
                 f"🔄 *Ваш заказ в обработке*\n\n"
                 f"📍 Адрес: {address}\n"
                 f"📝 Ваш заказ: {user_info['text']}\n\n"
-                f"*Менеджер скоро свяжется с Вами в этом чате.*"
+                f"*Менеджер скоро свяжется с Вами в этом чате.*\n\n"
+                f"━━━━━━━━━━━━━━━━━━━━━━\n"
+                f"Вы в любой момент можете вернуться к диалогу.\n"
+                f"Просто нажмите в меню кнопку \"👤 Связь с админом\"\n"
+                f"━━━━━━━━━━━━━━━━━━━━━━"
+            )
+            
+            buyer_keyboard = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True)
+            buyer_keyboard.row('📝 Написать сообщение администратору')
+            buyer_keyboard.row('🔄 Вернуться к оформлению заказа (меню)')
+            
+            bot.send_message(
+                user_id,
+                buyer_msg,
+                parse_mode="Markdown",
+                reply_markup=buyer_keyboard
             )
             
             bot.answer_callback_query(call.id, f"✅ Заказ {seller_name}_{order_number} создан")
@@ -1717,20 +1792,22 @@ def process_admin_reply(message, buyer_id):
         admin_chats[buyer_id]['messages'].append({
             'sender': 'admin',
             'text': message.text,
-            'time': datetime.now().strftime("%H:%M")
+            'time': format_time_only()
         })
         
-        # Отправляем покупателю
+        # Отправляем покупателю с обновленным дизайном
         buyer_msg = (
             f"💬 *Ответ от Администратора:*\n\n"
             f"{message.text}\n\n"
             f"━━━━━━━━━━━━━━━━━━━━━━\n"
-            f"Не переживайте, Вы в любой момент можете вернуться к диалогу с администратором, "
-            f"просто нажмите в меню кнопку \"👤 Связь с админом\""
+            f"Вы в любой момент можете вернуться к диалогу.\n"
+            f"Просто нажмите в меню кнопку \"👤 Связь с админом\"\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━"
         )
         
         keyboard = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True)
-        keyboard.row('🔄 Вернуться к оформлению заказа')
+        keyboard.row('📝 Написать сообщение администратору')
+        keyboard.row('🔄 Вернуться к оформлению заказа (меню)')
         
         bot.send_message(
             buyer_id,
@@ -1756,8 +1833,8 @@ def process_admin_reply(message, buyer_id):
 def send_daily_summary():
     """Отправляет ежедневную сводку продавцам"""
     while True:
-        now = datetime.now()
-        # Отправляем в 9:00 каждый день
+        now = get_novosibirsk_time()
+        # Отправляем в 9:00 каждый день по Новосибирску
         target_time = now.replace(hour=9, minute=0, second=0, microsecond=0)
         if now > target_time:
             target_time += timedelta(days=1)
@@ -1773,7 +1850,7 @@ def send_daily_summary():
                 completed_yesterday = 0
                 
                 # Считаем завершенные за вчера
-                yesterday = (datetime.now() - timedelta(days=1)).strftime("%d.%m.%Y")
+                yesterday = (get_novosibirsk_time() - timedelta(days=1)).strftime("%d.%m.%Y")
                 for order in completed_orders.get(seller_name, {}).values():
                     if order.get('timestamp') == yesterday:
                         completed_yesterday += 1
@@ -1818,6 +1895,8 @@ if __name__ == '__main__':
     
     bot.set_webhook(url=webhook_url)
     print(f"✅ Вебхук установлен: {webhook_url}")
+    print(f"🕐 Часовой пояс: Новосибирск (UTC+7)")
+    print(f"🕐 Текущее время: {format_time()}")
     
     port = int(os.environ.get('PORT', 10000))
     app.run(host='0.0.0.0', port=port, debug=False)
