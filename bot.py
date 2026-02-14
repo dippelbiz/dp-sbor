@@ -1,7 +1,7 @@
 import os
 import telebot
 from flask import Flask, request
-from datetime import datetime
+from datetime import datetime, timedelta
 import json
 import time
 import shutil
@@ -15,6 +15,15 @@ if not TOKEN:
 
 bot = telebot.TeleBot(TOKEN)
 app = Flask(__name__)
+
+# Часовой пояс (Новосибирск UTC+7)
+def get_current_time():
+    """Возвращает текущее время с учетом часового пояса +7"""
+    return datetime.now() + timedelta(hours=7)
+
+def get_current_time_str(format="%d.%m.%Y %H:%M:%S"):
+    """Возвращает отформатированную строку времени с учетом часового пояса +7"""
+    return (datetime.now() + timedelta(hours=7)).strftime(format)
 
 # Имя файла для хранения данных
 DATA_FILE = 'bot_data.json'
@@ -74,7 +83,7 @@ def create_backup_dir():
 
 def get_backup_filename():
     """Генерация имени файла бэкапа"""
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    timestamp = get_current_time().strftime("%Y%m%d_%H%M%S")
     return f"{BACKUP_DIR}/backup_{timestamp}.json"
 
 def create_backup():
@@ -82,7 +91,7 @@ def create_backup():
     create_backup_dir()
     
     backup_data = {
-        'timestamp': datetime.now().strftime("%d.%m.%Y %H:%M:%S"),
+        'timestamp': get_current_time_str(),
         'seller_counters': seller_counters,
         'active_orders': active_orders,
         'archive_orders': archive_orders,
@@ -143,7 +152,7 @@ def restore_from_uploaded_file(file_path):
     """Восстановление из загруженного файла"""
     try:
         # Копируем загруженный файл в папку бэкапов
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        timestamp = get_current_time().strftime("%Y%m%d_%H%M%S")
         backup_filename = f"{BACKUP_DIR}/uploaded_backup_{timestamp}.json"
         shutil.copy2(file_path, backup_filename)
         
@@ -399,7 +408,7 @@ def log_message(order_id, sender_id, sender_name, sender_role, message_text):
         chat_history[order_id] = []
     
     chat_history[order_id].append({
-        'timestamp': datetime.now().strftime("%d.%m.%Y %H:%M:%S"),
+        'timestamp': get_current_time_str(),
         'sender_id': sender_id,
         'sender_name': sender_name,
         'sender_role': sender_role,
@@ -575,7 +584,7 @@ def force_complete_order(admin_id, order_id):
         )
         
         # Сохраняем в архив
-        order['completed_at'] = datetime.now().strftime("%d.%m.%Y %H:%M:%S")
+        order['completed_at'] = get_current_time_str()
         order['completed_by'] = "admin"
         archive_orders[order_id] = order
         
@@ -623,7 +632,7 @@ def handle_document(message):
         downloaded_file = bot.download_file(file_info.file_path)
         
         # Сохраняем временный файл
-        temp_file = f"temp_backup_{user_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+        temp_file = f"temp_backup_{user_id}_{get_current_time().strftime('%Y%m%d_%H%M%S')}.json"
         with open(temp_file, 'wb') as f:
             f.write(downloaded_file)
         
@@ -666,8 +675,9 @@ def send_catalog(message):
         "1. *Грецкий орех очищенный*, 500г - 400 ₽\n"
         "2. *Миндаль золотой*, 1000г - 950 ₽\n"
         "3. *Кешью WW320*, 1000г - 1000 ₽\n"
-        "4. *Манго сушеное*, 500г - 250 ₽\n"
-        "5. *Клубника сушеная*, 500г- 350 ₽\n\n"
+        "4. *Фисташки*, 500г - 600 ₽\n\n"
+        "5. *Манго сушеное*, 500г - 250 ₽\n"
+        "6. *Клубника сушеная*, 500г- 350 ₽\n\n"
         "*Для заказа напишите что Вам нужно*"
     )
     bot.send_message(message.chat.id, catalog_text, parse_mode="Markdown")
@@ -1215,7 +1225,7 @@ def handle_callback(call):
             'seller_name': seller_name,
             'address': address,
             'order_text': user_info['text'],
-            'timestamp': datetime.now().strftime("%d.%m.%Y"),
+            'timestamp': get_current_time_str("%d.%m.%Y"),
             'updated_at': None,
             'status': 'active'
         }
@@ -1247,7 +1257,7 @@ def handle_callback(call):
         # Сообщение продавцу
         seller_message = (
             f"📦 *НОВЫЙ ЗАКАЗ #{order_id}*\n"
-            f"📅 {datetime.now().strftime('%d.%m.%Y')}\n\n"
+            f"📅 {get_current_time_str('%d.%m.%Y')}\n\n"
             f"👤 *Покупатель:* {buyer_name}\n"
             f"📍 *Точка:* {address}\n"
             f"📝 *Заказ:* {user_info['text']}\n\n"
@@ -1580,7 +1590,7 @@ def handle_text(message):
                 # Обновляем заказ
                 old_order_text = order['order_text']
                 order['order_text'] = text
-                order['updated_at'] = datetime.now().strftime("%d.%m.%Y")
+                order['updated_at'] = get_current_time_str("%d.%m.%Y")
                 
                 # Логируем уточнение заказа
                 log_message(
@@ -1889,7 +1899,7 @@ def handle_seller_close_callback(call):
             )
         
         # Сохраняем в архив
-        order['completed_at'] = datetime.now().strftime("%d.%m.%Y %H:%M:%S")
+        order['completed_at'] = get_current_time_str()
         order['completed_by'] = "seller"
         archive_orders[order_id] = order
         
