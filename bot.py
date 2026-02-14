@@ -1178,6 +1178,23 @@ def handle_buyer_message(message):
         
         return
     
+    # Проверяем, есть ли временные данные (начатый, но не завершенный заказ)
+    if user_id in user_data:
+        # Если пользователь уже начал заказ, но не выбрал адрес,
+        # и сейчас пишет снова - это новый заказ, заменяем старый
+        user_data[user_id] = {
+            'text': text,
+            'name': message.from_user.first_name or "Покупатель",
+            'user_id': user_id
+        }
+        
+        bot.send_message(
+            user_id,
+            "✅ Сообщение получено! Выберите удобный адрес:",
+            reply_markup=get_address_keyboard()
+        )
+        return
+    
     # Если дошли сюда - это новый заказ
     user_data[user_id] = {
         'text': text,
@@ -1628,7 +1645,7 @@ def handle_address_selection(call):
             parse_mode="Markdown"
         )
     
-    # Очищаем временные данные
+    # ВАЖНО: Очищаем временные данные ПОСЛЕ создания заказа
     if user_id in user_data:
         del user_data[user_id]
     
