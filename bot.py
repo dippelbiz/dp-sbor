@@ -64,10 +64,6 @@ active_chats = {}
 # Ожидание уточнения заказа от продавца {seller_id: order_ref}
 seller_waiting_for_order_update = {}
 
-# Админ-чаты {chat_ref: chat_data} где chat_ref = "Admin1", "Admin2"
-admin_chats = {}
-admin_counter = 0  # Счетчик для админ-чатов
-
 # Список точек
 pickup_points = {
     "ул. Галущака 15": "Александр",
@@ -87,8 +83,6 @@ def save_data():
         'completed_orders': completed_orders,
         'active_chats': active_chats,
         'seller_waiting': seller_waiting_for_order_update,
-        'admin_chats': admin_chats,
-        'admin_counter': admin_counter,
         'last_save': datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     }
     
@@ -100,7 +94,7 @@ def save_data():
         
         # Если успешно, заменяем основной файл
         os.replace(temp_file, DATA_FILE)
-        print(f"✅ Данные сохранены: {len(active_orders)} активных заказов, {len(admin_chats)} админ-чатов")
+        print(f"✅ Данные сохранены: {len(active_orders)} активных заказов")
         
     except Exception as e:
         print(f"❌ Ошибка сохранения данных: {e}")
@@ -110,7 +104,7 @@ def save_data():
 def load_data():
     """Загружаем все данные из файла"""
     global seller_counters, active_orders, completed_orders, active_chats
-    global seller_waiting_for_order_update, admin_chats, admin_counter
+    global seller_waiting_for_order_update
     
     if not os.path.exists(DATA_FILE):
         print("📁 Файл данных не найден, начинаем с нуля")
@@ -132,8 +126,6 @@ def load_data():
         completed_orders = data.get('completed_orders', {})
         active_chats = data.get('active_chats', {})
         seller_waiting_for_order_update = data.get('seller_waiting', {})
-        admin_chats = data.get('admin_chats', {})
-        admin_counter = data.get('admin_counter', 0)
         
         # Конвертируем строковые ID в числа где нужно
         convert_data_types()
@@ -141,7 +133,6 @@ def load_data():
         print(f"✅ Данные загружены:")
         print(f"   - Активных заказов: {len(active_orders)}")
         print(f"   - Завершенных заказов: {len(completed_orders)}")
-        print(f"   - Админ-чатов: {len(admin_chats)}")
         
     except Exception as e:
         print(f"❌ Ошибка загрузки данных: {e}")
@@ -290,86 +281,6 @@ def find_order_by_ref(ref):
         return completed_orders[ref]
     return None
 
-# ====== ФУНКЦИИ ДЛЯ РАБОТЫ С АДМИН-ЧАТАМИ ======
-
-def generate_admin_chat_ref():
-    """Генерирует ссылку на админ-чат вида Admin1, Admin2"""
-    global admin_counter
-    admin_counter += 1
-    return f"Admin{admin_counter}"
-
-def create_admin_chat(user_id, user_name, first_message):
-    """Создает новый админ-чат"""
-    chat_ref = generate_admin_chat_ref()
-    
-    admin_chats[chat_ref] = {
-        'user_id': user_id,
-        'user_name': user_name,
-        'status': 'active',
-        'history': [
-            {
-                'time': datetime.now().strftime("%d.%m %H:%M"),
-                'role': 'user',
-                'text': first_message
-            }
-        ],
-        'created': datetime.now().strftime("%d.%m %H:%M"),
-        'last_message': datetime.now().strftime("%d.%m %H:%M"),
-        'completed': None
-    }
-    
-    save_data()
-    return chat_ref
-
-def add_message_to_admin_chat(chat_ref, role, text):
-    """Добавляет сообщение в историю админ-чата"""
-    if chat_ref in admin_chats:
-        admin_chats[chat_ref]['history'].append({
-            'time': datetime.now().strftime("%d.%m %H:%M"),
-            'role': role,
-            'text': text
-        })
-        admin_chats[chat_ref]['last_message'] = datetime.now().strftime("%d.%m %H:%M")
-        save_data()
-        return True
-    return False
-
-def get_admin_chat_by_user(user_id):
-    """Получает активный админ-чат пользователя"""
-    for chat_ref, chat in admin_chats.items():
-        if chat['user_id'] == user_id and chat['status'] == 'active':
-            return chat_ref, chat
-    return None, None
-
-def format_admin_chat_history(chat_ref):
-    """Форматирует историю админ-чата для показа"""
-    if chat_ref not in admin_chats:
-        return "Чат не найден"
-    
-    chat = admin_chats[chat_ref]
-    history = f"📜 История чата {chat_ref} с {chat['user_name']}\n\n"
-    
-    for msg in chat['history']:
-        if msg['role'] == 'user':
-            history += f"👤 [{msg['time']}] {msg['text']}\n\n"
-        else:
-            history += f"👑 [{msg['time']}] {msg['text']}\n\n"
-    
-    return history
-
-def get_unresolved_chats():
-    """Возвращает список активных админ-чатов"""
-    unresolved = []
-    for chat_ref, chat in admin_chats.items():
-        if chat['status'] == 'active':
-            unresolved.append({
-                'ref': chat_ref,
-                'user_name': chat['user_name'],
-                'last_message': chat['last_message']
-            })
-    # Сортируем по последнему сообщению (сначала новые)
-    return sorted(unresolved, key=lambda x: x['last_message'], reverse=True)
-
 # ====== ФУНКЦИИ ДЛЯ БЭКАПОВ ======
 
 def create_backup(backup_type='auto'):
@@ -388,9 +299,7 @@ def create_backup(backup_type='auto'):
             'active_orders': active_orders,
             'completed_orders': completed_orders,
             'active_chats': active_chats,
-            'seller_waiting': seller_waiting_for_order_update,
-            'admin_chats': admin_chats,
-            'admin_counter': admin_counter
+            'seller_waiting': seller_waiting_for_order_update
         }
     }
     
@@ -433,11 +342,10 @@ def get_backups_list():
             backup_type = data.get('type', 'unknown')
             active = len(data.get('data', {}).get('active_orders', {}))
             completed = len(data.get('data', {}).get('completed_orders', {}))
-            admin = len(data.get('data', {}).get('admin_chats', {}))
             
             result.append({
                 'file': backup_file,
-                'display': f"{i}. {timestamp} - {backup_type} - {active} акт, {completed} зав, {admin} чатов"
+                'display': f"{i}. {timestamp} - {backup_type} - {active} акт, {completed} зав"
             })
         except:
             continue
@@ -447,7 +355,7 @@ def get_backups_list():
 def restore_from_backup(backup_file):
     """Восстанавливает систему из бэкапа"""
     global seller_counters, active_orders, completed_orders, active_chats
-    global seller_waiting_for_order_update, admin_chats, admin_counter
+    global seller_waiting_for_order_update
     
     try:
         with open(backup_file, 'r', encoding='utf-8') as f:
@@ -460,8 +368,6 @@ def restore_from_backup(backup_file):
         completed_orders = data.get('completed_orders', {})
         active_chats = data.get('active_chats', {})
         seller_waiting_for_order_update = data.get('seller_waiting', {})
-        admin_chats = data.get('admin_chats', {})
-        admin_counter = data.get('admin_counter', 0)
         
         convert_data_types()
         save_data()
@@ -494,12 +400,6 @@ def get_address_keyboard():
         keyboard.add(address)
     return keyboard
 
-def get_cancel_keyboard(cancel_text="❌ Отменить"):
-    """Клавиатура с одной кнопкой отмены"""
-    keyboard = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
-    keyboard.add(cancel_text)
-    return keyboard
-
 def get_back_to_order_keyboard():
     """Кнопка возврата к оформлению заказа (отдельным сообщением)"""
     keyboard = telebot.types.InlineKeyboardMarkup()
@@ -527,26 +427,24 @@ def get_seller_cancel_update_keyboard():
     ))
     return keyboard
 
+def get_seller_confirm_close_keyboard(order_ref):
+    """Кнопки подтверждения завершения заказа"""
+    keyboard = telebot.types.InlineKeyboardMarkup()
+    keyboard.row(
+        telebot.types.InlineKeyboardButton("✅ Да, завершить", callback_data=f"seller_confirm_close_{order_ref}"),
+        telebot.types.InlineKeyboardButton("❌ Отмена", callback_data=f"seller_view_{order_ref}")
+    )
+    return keyboard
+
 def get_admin_main_keyboard():
     """Основная клавиатура администратора"""
     keyboard = telebot.types.InlineKeyboardMarkup()
     keyboard.row(
-        telebot.types.InlineKeyboardButton("📋 Нерешенные вопросы", callback_data="admin_unresolved"),
-        telebot.types.InlineKeyboardButton("📦 Активные заказы", callback_data="admin_active_orders")
+        telebot.types.InlineKeyboardButton("📦 Активные заказы", callback_data="admin_active_orders"),
+        telebot.types.InlineKeyboardButton("📜 Завершенные заказы", callback_data="admin_completed_orders")
     )
     keyboard.row(
-        telebot.types.InlineKeyboardButton("📜 Завершенные заказы", callback_data="admin_completed_orders"),
         telebot.types.InlineKeyboardButton("💾 Бэкапы", callback_data="admin_backups")
-    )
-    return keyboard
-
-def get_admin_chat_actions_keyboard(chat_ref):
-    """Кнопки действий с админ-чатом"""
-    keyboard = telebot.types.InlineKeyboardMarkup()
-    keyboard.row(
-        telebot.types.InlineKeyboardButton("✏️ Ответить", callback_data=f"admin_chat_reply_{chat_ref}"),
-        telebot.types.InlineKeyboardButton("✅ Завершить вопрос", callback_data=f"admin_chat_close_{chat_ref}"),
-        telebot.types.InlineKeyboardButton("↩️ Назад", callback_data="admin_back_to_unresolved")
     )
     return keyboard
 
@@ -571,6 +469,15 @@ def get_restore_menu_keyboard():
         telebot.types.InlineKeyboardButton("📎 Загрузить файл", callback_data="backup_restore_upload")
     )
     keyboard.row(telebot.types.InlineKeyboardButton("↩️ Назад", callback_data="admin_backups"))
+    return keyboard
+
+def get_admin_force_close_keyboard(order_ref):
+    """Кнопки подтверждения принудительного завершения заказа"""
+    keyboard = telebot.types.InlineKeyboardMarkup()
+    keyboard.row(
+        telebot.types.InlineKeyboardButton("✅ Да, завершить", callback_data=f"admin_confirm_force_close_{order_ref}"),
+        telebot.types.InlineKeyboardButton("❌ Отмена", callback_data=f"admin_view_order_{order_ref}")
+    )
     return keyboard
 
 # ====== ОБЩИЕ ФУНКЦИИ ======
@@ -609,17 +516,6 @@ def cmd_admin(message):
         parse_mode="Markdown",
         reply_markup=get_admin_main_keyboard()
     )
-
-@bot.message_handler(commands=['chats'])
-def cmd_chats(message):
-    """Быстрый просмотр нерешенных вопросов"""
-    user_id = message.from_user.id
-    
-    if not is_admin(user_id):
-        bot.send_message(user_id, "❌ У вас нет прав администратора")
-        return
-    
-    show_unresolved_chats(user_id)
 
 @bot.message_handler(commands=['backup'])
 def cmd_backup(message):
@@ -667,7 +563,7 @@ def handle_catalog(message):
     # Отдельное сообщение с кнопкой возврата
     bot.send_message(
         chat_id,
-        "⬆️ Нажмите кнопку ниже, чтобы вернуться к оформлению заказа",
+        "Нажмите кнопку ниже, чтобы вернуться к оформлению заказа",
         reply_markup=get_back_to_order_keyboard()
     )
 
@@ -696,57 +592,34 @@ def handle_about(message):
     # Отдельное сообщение с кнопкой возврата
     bot.send_message(
         chat_id,
-        "⬆️ Нажмите кнопку ниже, чтобы вернуться к оформлению заказа",
+        "Нажмите кнопку ниже, чтобы вернуться к оформлению заказа",
         reply_markup=get_back_to_order_keyboard()
     )
 
 @bot.message_handler(func=lambda message: message.text == '👤 Связаться с админом')
 def handle_contact_admin(message):
-    """Начало чата с администратором"""
+    """Мгновенный переход в личный чат с администратором"""
     user_id = message.from_user.id
-    user_name = message.from_user.first_name or "Покупатель"
     
-    # Проверяем, есть ли уже активный чат
-    existing_chat_ref, existing_chat = get_admin_chat_by_user(user_id)
-    
-    if existing_chat_ref:
-        # Показываем историю существующего чата
-        history = format_admin_chat_history(existing_chat_ref)
+    if not ADMIN_ID:
         bot.send_message(
             user_id,
-            history,
-            parse_mode="Markdown",
-            reply_markup=get_buyer_main_keyboard()
+            "❌ К сожалению, администратор временно недоступен."
         )
-        
-        bot.send_message(
-            user_id,
-            "📬 *Продолжение диалога с администратором*\n\n"
-            "Напишите ваше сообщение. Администратор ответит вам в этом чате.\n"
-            "Для выхода нажмите кнопку ниже. Вы можете всегда вернуться.",
-            parse_mode="Markdown",
-            reply_markup=get_buyer_main_keyboard()
-        )
-    else:
-        # Новый чат
-        bot.send_message(
-            user_id,
-            "📬 *Режим связи с администратором*\n\n"
-            "Напишите ваше сообщение. Администратор ответит вам в этом чате.\n"
-            "Для выхода нажмите кнопку ниже. Вы можете всегда вернуться.",
-            parse_mode="Markdown",
-            reply_markup=get_buyer_main_keyboard()
-        )
+        return
     
-    # Кнопка возврата отдельным сообщением
+    # Создаем кнопку с прямой ссылкой на админа
+    keyboard = telebot.types.InlineKeyboardMarkup()
+    keyboard.add(telebot.types.InlineKeyboardButton(
+        text="👤 Написать администратору",
+        url=f"tg://user?id={ADMIN_ID}"
+    ))
+    
     bot.send_message(
         user_id,
-        "⬆️ Нажмите кнопку ниже, чтобы вернуться к оформлению заказа",
-        reply_markup=get_back_to_order_keyboard()
+        "Нажмите кнопку ниже, чтобы написать администратору:",
+        reply_markup=keyboard
     )
-    
-    # Устанавливаем состояние ожидания сообщения для админа
-    user_data[user_id] = {'state': 'waiting_for_admin_message'}
 
 @bot.message_handler(func=lambda message: message.text == '🔄 Сделать новый заказ')
 def handle_new_order(message):
@@ -761,7 +634,7 @@ def handle_text(message):
     
     # --- АДМИНИСТРАТОР ---
     if is_admin(user_id):
-        # Проверяем, не является ли это ответом на заказ или админ-чат
+        # Проверяем, не является ли это ответом на заказ
         if text.startswith('#'):
             handle_admin_reply(message)
         else:
@@ -790,11 +663,11 @@ def handle_admin_reply(message):
         bot.send_message(
             user_id,
             "❌ Неверный формат.\n"
-            "✅ Правильно: #А1 *текст* или #Admin1 *текст*"
+            "✅ Правильно: #А1 *текст*"
         )
         return
     
-    # Проверяем, это заказ или админ-чат
+    # Проверяем, это заказ
     if ref in active_orders:
         # Ответ на заказ
         order = active_orders[ref]
@@ -820,75 +693,11 @@ def handle_admin_reply(message):
             f"✅ Сообщение отправлено покупателю (Заказ {ref})"
         )
         
-    elif ref in admin_chats:
-        # Ответ в админ-чат
-        chat = admin_chats[ref]
-        
-        if chat['status'] != 'active':
-            bot.send_message(
-                user_id,
-                f"❌ Чат {ref} уже завершен.\n"
-                "Для нового обращения покупатель должен нажать 'Связаться с админом'"
-            )
-            return
-        
-        # Отправляем покупателю
-        bot.send_message(
-            chat['user_id'],
-            f"💬 *Сообщение от администратора:*\n\n{message_text}",
-            parse_mode="Markdown"
-        )
-        
-        # Добавляем в историю
-        add_message_to_admin_chat(ref, 'admin', message_text)
-        
-        # Напоминание покупателю
-        bot.send_message(
-            chat['user_id'],
-            "Напишите сообщение или нажмите кнопку ниже. Вы можете всегда вернуться.",
-            reply_markup=get_back_to_order_keyboard()
-        )
-        
-        bot.send_message(
-            user_id,
-            f"✅ Сообщение отправлено покупателю (Чат {ref})"
-        )
-        
     else:
         bot.send_message(
             user_id,
-            f"❌ Заказ или чат {ref} не найден"
+            f"❌ Заказ {ref} не найден"
         )
-
-def show_unresolved_chats(chat_id):
-    """Показать список нерешенных вопросов"""
-    unresolved = get_unresolved_chats()
-    
-    if not unresolved:
-        bot.send_message(
-            chat_id,
-            "📋 Нет нерешенных вопросов"
-        )
-        return
-    
-    text = "📋 *Нерешенные вопросы:*\n\n"
-    keyboard = telebot.types.InlineKeyboardMarkup()
-    
-    for chat in unresolved:
-        text += f"• {chat['ref']} - {chat['user_name']} - последнее {chat['last_message']}\n"
-        keyboard.add(telebot.types.InlineKeyboardButton(
-            text=chat['ref'],
-            callback_data=f"admin_view_chat_{chat['ref']}"
-        ))
-    
-    keyboard.add(telebot.types.InlineKeyboardButton("↩️ Назад", callback_data="admin_back"))
-    
-    bot.send_message(
-        chat_id,
-        text,
-        parse_mode="Markdown",
-        reply_markup=keyboard
-    )
 
 def show_active_orders(chat_id):
     """Показать все активные заказы"""
@@ -1043,7 +852,13 @@ def show_order_details(chat_id, ref, is_completed=False):
             elif msg['role'] == 'admin':
                 history_text += f"👑 [{msg['time']}] {msg['text']}\n\n"
         
-        bot.send_message(chat_id, history_text, parse_mode="Markdown")
+        # Разбиваем на части, если слишком длинно
+        if len(history_text) > 4000:
+            parts = [history_text[i:i+4000] for i in range(0, len(history_text), 4000)]
+            for part in parts:
+                bot.send_message(chat_id, part, parse_mode="Markdown")
+        else:
+            bot.send_message(chat_id, history_text, parse_mode="Markdown")
     
     if not is_completed:
         # Кнопки для активного заказа
@@ -1058,6 +873,54 @@ def show_order_details(chat_id, ref, is_completed=False):
             "Действия с заказом:",
             reply_markup=keyboard
         )
+
+def force_close_order(chat_id, order_ref):
+    """Принудительное завершение заказа администратором"""
+    order = active_orders.get(order_ref)
+    
+    if not order:
+        bot.send_message(chat_id, f"❌ Заказ {order_ref} не найден")
+        return
+    
+    # Отправляем покупателю
+    bot.send_message(
+        order['buyer_id'],
+        f"✅ *Заказ {order_ref} завершен администратором*\n\n"
+        f"📝 *Содержание:* {order['order_text']}\n"
+        f"📍 *Адрес:* {order['address']}\n\n"
+        f"💬 *Если остались вопросы, свяжитесь с администратором*",
+        parse_mode="Markdown",
+        reply_markup=get_buyer_new_order_keyboard()
+    )
+    
+    # Уведомляем продавца
+    bot.send_message(
+        order['seller_id'],
+        f"👑 *Заказ {order_ref} завершен администратором*\n\n"
+        f"Покупатель уведомлен о завершении заказа.",
+        parse_mode="Markdown"
+    )
+    
+    # Добавляем в завершенные
+    order['completed_at'] = datetime.now().strftime("%d.%m.%Y %H:%M")
+    order['status'] = 'completed'
+    order['completed_by'] = 'admin'
+    completed_orders[order_ref] = order
+    
+    # Удаляем из активных
+    if order_ref in active_orders:
+        del active_orders[order_ref]
+    
+    # Удаляем из активных чатов
+    if order['buyer_id'] in active_chats:
+        del active_chats[order['buyer_id']]
+    
+    save_data()
+    
+    bot.send_message(chat_id, f"✅ Заказ {order_ref} принудительно завершен")
+    
+    # Возвращаемся к списку активных заказов
+    show_active_orders(chat_id)
 
 # ====== ОБРАБОТЧИКИ ДЛЯ ПРОДАВЦА ======
 
@@ -1260,7 +1123,7 @@ def handle_buyer_message(message):
     user_id = message.from_user.id
     text = message.text
     
-    # Проверяем, есть ли у покупателя активный заказ
+    # Проверяем, есть ли у покупателя активный заказ (чат с продавцом)
     if user_id in active_chats:
         # Отправляем сообщение продавцу
         order_ref = active_chats[user_id]
@@ -1307,44 +1170,15 @@ def handle_buyer_message(message):
             save_data()
         else:
             # Заказ не найден, удаляем из активных чатов
-            del active_chats[user_id]
+            if user_id in active_chats:
+                del active_chats[user_id]
             save_data()
             # Предлагаем сделать новый заказ
             show_instruction(user_id)
         
         return
     
-    # Проверяем, не в режиме ли чата с админом
-    existing_chat_ref, existing_chat = get_admin_chat_by_user(user_id)
-    if existing_chat_ref:
-        # Отправляем сообщение админу
-        add_message_to_admin_chat(existing_chat_ref, 'user', text)
-        
-        # Уведомляем админа
-        if ADMIN_ID:
-            bot.send_message(
-                ADMIN_ID,
-                f"📩 *Новое сообщение в чате {existing_chat_ref}*\n\n"
-                f"👤 {existing_chat['user_name']}\n"
-                f"💬 {text}\n"
-                f"💬 [Связаться](tg://user?id={user_id})",
-                parse_mode="Markdown"
-            )
-        
-        bot.send_message(
-            user_id,
-            "✅ Сообщение отправлено администратору"
-        )
-        
-        bot.send_message(
-            user_id,
-            "Напишите новое сообщение, или нажмите кнопку ниже. Вы можете всегда вернуться.",
-            reply_markup=get_back_to_order_keyboard()
-        )
-        
-        return
-    
-    # Новый заказ
+    # Если дошли сюда - это новый заказ
     user_data[user_id] = {
         'text': text,
         'name': message.from_user.first_name or "Покупатель",
@@ -1378,14 +1212,8 @@ def handle_callback(call):
         return
     
     # ===== КНОПКИ ДЛЯ ПРОДАВЦА =====
-    if data.startswith('seller_update_'):
-        handle_seller_update_callback(call)
-        return
-    elif data.startswith('seller_close_'):
-        handle_seller_close_callback(call)
-        return
-    elif data == "seller_cancel_update":
-        handle_seller_cancel_update(call)
+    if data.startswith('seller_'):
+        handle_seller_callbacks(call)
         return
     
     # ===== КНОПКИ ДЛЯ АДМИНИСТРАТОРА =====
@@ -1394,10 +1222,7 @@ def handle_callback(call):
         return
     
     # Главное меню админа
-    if data == "admin_unresolved":
-        bot.answer_callback_query(call.id)
-        show_unresolved_chats(chat_id)
-    elif data == "admin_active_orders":
+    if data == "admin_active_orders":
         bot.answer_callback_query(call.id)
         show_active_orders(chat_id)
     elif data == "admin_completed_orders":
@@ -1409,29 +1234,6 @@ def handle_callback(call):
     elif data == "admin_back":
         bot.answer_callback_query(call.id)
         cmd_admin(call.message)
-    
-    # Админ-чаты
-    elif data.startswith('admin_view_chat_'):
-        chat_ref = data.replace('admin_view_chat_', '')
-        bot.answer_callback_query(call.id)
-        show_admin_chat(chat_id, chat_ref)
-    elif data.startswith('admin_chat_reply_'):
-        chat_ref = data.replace('admin_chat_reply_', '')
-        bot.answer_callback_query(call.id)
-        bot.send_message(
-            chat_id,
-            f"✏️ *Ответ в чат {chat_ref}*\n\n"
-            f"Используйте формат: #{chat_ref} *текст*\n\n"
-            f"Пример: #{chat_ref} Здравствуйте, чем могу помочь?",
-            parse_mode="Markdown"
-        )
-    elif data.startswith('admin_chat_close_'):
-        chat_ref = data.replace('admin_chat_close_', '')
-        bot.answer_callback_query(call.id)
-        close_admin_chat(chat_id, chat_ref)
-    elif data == "admin_back_to_unresolved":
-        bot.answer_callback_query(call.id)
-        show_unresolved_chats(chat_id)
     
     # Заказы
     elif data.startswith('admin_view_order_'):
@@ -1449,7 +1251,28 @@ def handle_callback(call):
     elif data.startswith('admin_force_close_'):
         ref = data.replace('admin_force_close_', '')
         bot.answer_callback_query(call.id)
+        # Запрос подтверждения
+        bot.send_message(
+            chat_id,
+            f"⚠️ *Принудительно завершить заказ {ref}?*\n\n"
+            f"Это действие закроет чат с покупателем и завершит заказ.",
+            parse_mode="Markdown",
+            reply_markup=get_admin_force_close_keyboard(ref)
+        )
+    elif data.startswith('admin_confirm_force_close_'):
+        ref = data.replace('admin_confirm_force_close_', '')
+        bot.answer_callback_query(call.id)
         force_close_order(chat_id, ref)
+    elif data.startswith('admin_reply_'):
+        ref = data.replace('admin_reply_', '')
+        bot.answer_callback_query(call.id)
+        bot.send_message(
+            chat_id,
+            f"✏️ *Ответ в заказ {ref}*\n\n"
+            f"Используйте формат: #{ref} *текст*\n\n"
+            f"Пример: #{ref} Здравствуйте, чем могу помочь?",
+            parse_mode="Markdown"
+        )
     
     # Бэкапы
     elif data == "backup_create":
@@ -1495,6 +1318,215 @@ def handle_callback(call):
         backup_file = data.replace('backup_restore_file_', '')
         bot.answer_callback_query(call.id)
         confirm_restore(chat_id, backup_file)
+    elif data.startswith('backup_do_restore_'):
+        backup_file = data.replace('backup_do_restore_', '')
+        bot.answer_callback_query(call.id)
+        bot.send_message(chat_id, "⏳ Восстановление из бэкапа...")
+        success, result = restore_from_backup(backup_file)
+        if success:
+            bot.send_message(
+                chat_id,
+                f"✅ *Система успешно восстановлена из бэкапа от {result}*\n\n"
+                f"Восстановлено:\n"
+                f"• {len(active_orders)} активных заказов\n"
+                f"• {len(completed_orders)} завершенных заказов\n\n"
+                f"Все данные загружены. Система работает в штатном режиме.",
+                parse_mode="Markdown"
+            )
+        else:
+            bot.send_message(
+                chat_id,
+                f"❌ Ошибка восстановления: {result}"
+            )
+
+def handle_seller_callbacks(call):
+    """Обработчик кнопок продавца"""
+    data = call.data
+    seller_id = call.from_user.id
+    
+    if data.startswith('seller_update_'):
+        order_ref = data.replace('seller_update_', '')
+        order = active_orders.get(order_ref)
+        
+        if not order:
+            bot.answer_callback_query(call.id, "❌ Заказ не найден")
+            return
+        
+        if order['seller_id'] != seller_id:
+            bot.answer_callback_query(call.id, "❌ Это не ваш заказ")
+            return
+        
+        seller_waiting_for_order_update[seller_id] = order_ref
+        bot.answer_callback_query(call.id)
+        
+        bot.send_message(
+            seller_id,
+            f"✏️ *Уточнение заказа {order_ref}*\n\n"
+            f"📍 Адрес: {order['address']}\n"
+            f"📝 *Текущий заказ:* {order['order_text']}\n\n"
+            f"Напишите новый состав заказа.",
+            parse_mode="Markdown"
+        )
+        
+        bot.send_message(
+            seller_id,
+            "Нажмите кнопку ниже, чтобы отменить уточнение",
+            reply_markup=get_seller_cancel_update_keyboard()
+        )
+        
+    elif data.startswith('seller_close_'):
+        order_ref = data.replace('seller_close_', '')
+        order = active_orders.get(order_ref)
+        
+        if not order:
+            bot.answer_callback_query(call.id, "❌ Заказ не найден")
+            return
+        
+        if order['seller_id'] != seller_id:
+            bot.answer_callback_query(call.id, "❌ Это не ваш заказ")
+            return
+        
+        bot.answer_callback_query(call.id)
+        
+        bot.send_message(
+            seller_id,
+            f"⚠️ *Завершить заказ {order_ref}?*\n\n"
+            f"Покупатель получит финальное сообщение с составом заказа.",
+            parse_mode="Markdown",
+            reply_markup=get_seller_confirm_close_keyboard(order_ref)
+        )
+        
+    elif data == "seller_cancel_update":
+        if seller_id not in seller_waiting_for_order_update:
+            bot.answer_callback_query(call.id, "❌ Нет активного уточнения")
+            return
+        
+        order_ref = seller_waiting_for_order_update[seller_id]
+        order = active_orders.get(order_ref)
+        
+        if order:
+            bot.answer_callback_query(call.id, "✅ Уточнение отменено")
+            bot.send_message(
+                seller_id,
+                f"❌ *Уточнение заказа {order_ref} отменено*\n\n"
+                f"Заказ остался без изменений.\n\n"
+                f"📝 *Текущий заказ:* {order['order_text']}\n"
+                f"📍 *Адрес:* {order['address']}",
+                parse_mode="Markdown",
+                reply_markup=get_seller_order_keyboard(order_ref)
+            )
+        else:
+            bot.answer_callback_query(call.id, "❌ Заказ не найден")
+        
+        if seller_id in seller_waiting_for_order_update:
+            del seller_waiting_for_order_update[seller_id]
+            
+    elif data.startswith('seller_confirm_close_'):
+        order_ref = data.replace('seller_confirm_close_', '')
+        order = active_orders.get(order_ref)
+        
+        if not order or order['seller_id'] != seller_id:
+            bot.answer_callback_query(call.id, "❌ Ошибка")
+            return
+        
+        # Формируем финальное сообщение для покупателя
+        final_text = order['order_text']
+        order_date = order.get('updated_at', order['timestamp'])
+        
+        # Отправляем покупателю
+        bot.send_message(
+            order['buyer_id'],
+            f"✅ *Заказ от {order_date}*\n\n"
+            f"📝 *Содержание:* {final_text}\n"
+            f"📍 *Адрес:* {order['address']}\n\n"
+            f"💬 *Чат с менеджером закрыт*",
+            parse_mode="Markdown",
+            reply_markup=get_buyer_new_order_keyboard()
+        )
+        
+        # Добавляем в завершенные
+        order['completed_at'] = datetime.now().strftime("%d.%m.%Y %H:%M")
+        order['status'] = 'completed'
+        completed_orders[order_ref] = order
+        
+        # Удаляем из активных
+        if order_ref in active_orders:
+            del active_orders[order_ref]
+        
+        # Удаляем из активных чатов
+        if order['buyer_id'] in active_chats:
+            del active_chats[order['buyer_id']]
+        
+        # Удаляем из ожиданий
+        if seller_id in seller_waiting_for_order_update:
+            del seller_waiting_for_order_update[seller_id]
+        
+        save_data()
+        
+        # Сообщение продавцу
+        bot.edit_message_text(
+            f"✅ *ЗАКАЗ {order_ref} ЗАВЕРШЕН*\n\n"
+            f"👤 Покупатель: {order['buyer_name']}\n"
+            f"📍 Точка: {order['address']}\n"
+            f"📝 Заказ: {final_text}\n\n"
+            f"📅 Создан: {order['timestamp']}\n"
+            f"📅 Завершен: {order['completed_at']}",
+            seller_id,
+            call.message.message_id,
+            parse_mode="Markdown"
+        )
+        
+        # Показываем оставшиеся заказы
+        remaining = get_seller_active_orders(seller_id)
+        if remaining:
+            orders_list = '\n'.join([f"• #{ref}" for ref in remaining])
+            bot.send_message(
+                seller_id,
+                f"📋 *Осталось активных заказов: {len(remaining)}*\n\n"
+                f"{orders_list}\n\n"
+                f"💬 `#{remaining[0]} ваш текст`"
+            )
+        else:
+            bot.send_message(
+                seller_id,
+                "✅ *Все заказы завершены!*\n\n"
+                "Хорошего дня! Отдыхайте 🍃",
+                parse_mode="Markdown"
+            )
+        
+        # Уведомление админа
+        if ADMIN_ID:
+            bot.send_message(
+                ADMIN_ID,
+                f"👑 *ЗАКАЗ ЗАВЕРШЕН {order_ref}*\n\n"
+                f"👤 Продавец: {order['seller_name']}\n"
+                f"👤 Покупатель: {order['buyer_name']} [💬](tg://user?id={order['buyer_id']})\n"
+                f"📝 {final_text}",
+                parse_mode="Markdown"
+            )
+        
+        # Создаем бэкап
+        create_backup('auto')
+        
+        bot.answer_callback_query(call.id, "✅ Заказ завершен")
+        
+    elif data.startswith('seller_view_'):
+        order_ref = data.replace('seller_view_', '')
+        order = active_orders.get(order_ref)
+        
+        if order and order['seller_id'] == seller_id:
+            bot.answer_callback_query(call.id)
+            bot.send_message(
+                seller_id,
+                f"📦 *Заказ {order_ref}*\n\n"
+                f"👤 Покупатель: {order['buyer_name']}\n"
+                f"📍 Адрес: {order['address']}\n"
+                f"📝 Заказ: {order['order_text']}",
+                parse_mode="Markdown",
+                reply_markup=get_seller_order_keyboard(order_ref)
+            )
+        else:
+            bot.answer_callback_query(call.id, "❌ Заказ не найден")
 
 def handle_address_selection(call):
     """Обработка выбора адреса покупателем"""
@@ -1605,356 +1637,7 @@ def handle_address_selection(call):
     
     bot.answer_callback_query(call.id, f"✅ Заказ {order_ref} отправлен менеджеру")
 
-def handle_seller_update_callback(call):
-    """Обработка кнопки 'Уточнить заказ'"""
-    seller_id = call.from_user.id
-    order_ref = call.data.replace('seller_update_', '')
-    
-    order = active_orders.get(order_ref)
-    
-    if not order:
-        bot.answer_callback_query(call.id, "❌ Заказ не найден")
-        return
-    
-    if order['seller_id'] != seller_id:
-        bot.answer_callback_query(call.id, "❌ Это не ваш заказ")
-        return
-    
-    seller_waiting_for_order_update[seller_id] = order_ref
-    
-    bot.answer_callback_query(call.id)
-    
-    bot.send_message(
-        seller_id,
-        f"✏️ *Уточнение заказа {order_ref}*\n\n"
-        f"📍 Адрес: {order['address']}\n"
-        f"📝 *Текущий заказ:* {order['order_text']}\n\n"
-        f"Напишите новый состав заказа.",
-        parse_mode="Markdown"
-    )
-    
-    # Кнопка отмены отдельным сообщением
-    bot.send_message(
-        seller_id,
-        "⬆️ Нажмите кнопку ниже, чтобы отменить уточнение",
-        reply_markup=get_seller_cancel_update_keyboard()
-    )
-
-def handle_seller_cancel_update(call):
-    """Обработка отмены уточнения заказа"""
-    seller_id = call.from_user.id
-    
-    if seller_id not in seller_waiting_for_order_update:
-        bot.answer_callback_query(call.id, "❌ Нет активного уточнения")
-        return
-    
-    order_ref = seller_waiting_for_order_update[seller_id]
-    order = active_orders.get(order_ref)
-    
-    if order:
-        bot.answer_callback_query(call.id, "✅ Уточнение отменено")
-        
-        bot.send_message(
-            seller_id,
-            f"❌ *Уточнение заказа {order_ref} отменено*\n\n"
-            f"Заказ остался без изменений.\n\n"
-            f"📝 *Текущий заказ:* {order['order_text']}\n"
-            f"📍 *Адрес:* {order['address']}",
-            parse_mode="Markdown",
-            reply_markup=get_seller_order_keyboard(order_ref)
-        )
-    else:
-        bot.answer_callback_query(call.id, "❌ Заказ не найден")
-    
-    del seller_waiting_for_order_update[seller_id]
-
-def handle_seller_close_callback(call):
-    """Обработка кнопки 'Завершить заказ'"""
-    seller_id = call.from_user.id
-    order_ref = call.data.replace('seller_close_', '')
-    
-    order = active_orders.get(order_ref)
-    
-    if not order:
-        bot.answer_callback_query(call.id, "❌ Заказ не найден")
-        return
-    
-    if order['seller_id'] != seller_id:
-        bot.answer_callback_query(call.id, "❌ Это не ваш заказ")
-        return
-    
-    # Подтверждение завершения
-    keyboard = telebot.types.InlineKeyboardMarkup()
-    keyboard.row(
-        telebot.types.InlineKeyboardButton("✅ Да, завершить", callback_data=f"seller_confirm_close_{order_ref}"),
-        telebot.types.InlineKeyboardButton("❌ Отмена", callback_data=f"seller_view_{order_ref}")
-    )
-    
-    bot.answer_callback_query(call.id)
-    
-    bot.send_message(
-        seller_id,
-        f"⚠️ *Завершить заказ {order_ref}?*\n\n"
-        f"Покупатель получит финальное сообщение с составом заказа.",
-        parse_mode="Markdown",
-        reply_markup=keyboard
-    )
-
-# Дополнительные обработчики будут в следующей части...
-# ====== ПРОДОЛЖЕНИЕ ОБРАБОТЧИКОВ КОЛЛБЭКОВ ======
-
-@bot.callback_query_handler(func=lambda call: True)
-def handle_callback_continued(call):
-    """Продолжение обработки коллбэков (дополнительные обработчики)"""
-    chat_id = call.message.chat.id
-    user_id = call.from_user.id
-    data = call.data
-    
-    # Проверка прав для админских функций
-    if user_id != ADMIN_ID and not data.startswith(('seller_', 'back_to_order')):
-        bot.answer_callback_query(call.id, "❌ Нет прав")
-        return
-    
-    # ===== ПРОДОЛЖЕНИЕ КНОПОК ПРОДАВЦА =====
-    
-    if data.startswith('seller_confirm_close_'):
-        order_ref = data.replace('seller_confirm_close_', '')
-        order = active_orders.get(order_ref)
-        
-        if not order or order['seller_id'] != user_id:
-            bot.answer_callback_query(call.id, "❌ Ошибка")
-            return
-        
-        # Формируем финальное сообщение для покупателя
-        final_text = order['order_text']
-        order_date = order.get('updated_at', order['timestamp'])
-        
-        # Отправляем покупателю
-        bot.send_message(
-            order['buyer_id'],
-            f"✅ *Заказ от {order_date}*\n\n"
-            f"📝 *Содержание:* {final_text}\n"
-            f"📍 *Адрес:* {order['address']}\n\n"
-            f"💬 *Чат с менеджером закрыт*",
-            parse_mode="Markdown",
-            reply_markup=get_buyer_new_order_keyboard()
-        )
-        
-        # Добавляем в завершенные
-        order['completed_at'] = datetime.now().strftime("%d.%m.%Y %H:%M")
-        order['status'] = 'completed'
-        completed_orders[order_ref] = order
-        
-        # Удаляем из активных
-        del active_orders[order_ref]
-        
-        # Удаляем из активных чатов
-        if order['buyer_id'] in active_chats:
-            del active_chats[order['buyer_id']]
-        
-        # Удаляем из ожиданий
-        if user_id in seller_waiting_for_order_update:
-            del seller_waiting_for_order_update[user_id]
-        
-        save_data()
-        
-        # Сообщение продавцу
-        bot.edit_message_text(
-            f"✅ *ЗАКАЗ {order_ref} ЗАВЕРШЕН*\n\n"
-            f"👤 Покупатель: {order['buyer_name']}\n"
-            f"📍 Точка: {order['address']}\n"
-            f"📝 Заказ: {final_text}\n\n"
-            f"📅 Создан: {order['timestamp']}\n"
-            f"📅 Завершен: {order['completed_at']}",
-            chat_id,
-            call.message.message_id,
-            parse_mode="Markdown"
-        )
-        
-        # Показываем оставшиеся заказы
-        remaining = get_seller_active_orders(user_id)
-        if remaining:
-            orders_list = '\n'.join([f"• #{ref}" for ref in remaining])
-            bot.send_message(
-                user_id,
-                f"📋 *Осталось активных заказов: {len(remaining)}*\n\n"
-                f"{orders_list}\n\n"
-                f"💬 `#{remaining[0]} ваш текст`"
-            )
-        else:
-            bot.send_message(
-                user_id,
-                "✅ *Все заказы завершены!*\n\n"
-                "Хорошего дня! Отдыхайте 🍃",
-                parse_mode="Markdown"
-            )
-        
-        # Уведомление админа
-        if ADMIN_ID:
-            bot.send_message(
-                ADMIN_ID,
-                f"👑 *ЗАКАЗ ЗАВЕРШЕН {order_ref}*\n\n"
-                f"👤 Продавец: {order['seller_name']}\n"
-                f"👤 Покупатель: {order['buyer_name']} [💬](tg://user?id={order['buyer_id']})\n"
-                f"📝 {final_text}",
-                parse_mode="Markdown"
-            )
-        
-        # Создаем бэкап
-        create_backup('auto')
-        
-        bot.answer_callback_query(call.id, "✅ Заказ завершен")
-        
-    elif data.startswith('seller_view_'):
-        order_ref = data.replace('seller_view_', '')
-        order = active_orders.get(order_ref)
-        
-        if order and order['seller_id'] == user_id:
-            bot.answer_callback_query(call.id)
-            bot.send_message(
-                user_id,
-                f"📦 *Заказ {order_ref}*\n\n"
-                f"👤 Покупатель: {order['buyer_name']}\n"
-                f"📍 Адрес: {order['address']}\n"
-                f"📝 Заказ: {order['order_text']}",
-                parse_mode="Markdown",
-                reply_markup=get_seller_order_keyboard(order_ref)
-            )
-        else:
-            bot.answer_callback_query(call.id, "❌ Заказ не найден")
-    
-    # ===== АДМИНСКИЕ ФУНКЦИИ (ПРОДОЛЖЕНИЕ) =====
-    
-    elif data.startswith('admin_force_close_'):
-        order_ref = data.replace('admin_force_close_', '')
-        order = active_orders.get(order_ref)
-        
-        if not order:
-            bot.answer_callback_query(call.id, "❌ Заказ не найден")
-            return
-        
-        # Подтверждение
-        keyboard = telebot.types.InlineKeyboardMarkup()
-        keyboard.row(
-            telebot.types.InlineKeyboardButton("✅ Да, завершить", callback_data=f"admin_confirm_force_close_{order_ref}"),
-            telebot.types.InlineKeyboardButton("❌ Отмена", callback_data=f"admin_view_order_{order_ref}")
-        )
-        
-        bot.answer_callback_query(call.id)
-        
-        bot.send_message(
-            chat_id,
-            f"⚠️ *Принудительно завершить заказ {order_ref}?*\n\n"
-            f"Это действие закроет чат с покупателем и завершит заказ.",
-            parse_mode="Markdown",
-            reply_markup=keyboard
-        )
-    
-    elif data.startswith('admin_confirm_force_close_'):
-        order_ref = data.replace('admin_confirm_force_close_', '')
-        order = active_orders.get(order_ref)
-        
-        if not order:
-            bot.answer_callback_query(call.id, "❌ Заказ не найден")
-            return
-        
-        # Отправляем покупателю
-        bot.send_message(
-            order['buyer_id'],
-            f"✅ *Заказ {order_ref} завершен администратором*\n\n"
-            f"📝 *Содержание:* {order['order_text']}\n"
-            f"📍 *Адрес:* {order['address']}\n\n"
-            f"💬 *Если остались вопросы, свяжитесь с администратором*",
-            parse_mode="Markdown",
-            reply_markup=get_buyer_new_order_keyboard()
-        )
-        
-        # Уведомляем продавца
-        bot.send_message(
-            order['seller_id'],
-            f"👑 *Заказ {order_ref} завершен администратором*\n\n"
-            f"Покупатель уведомлен о завершении заказа.",
-            parse_mode="Markdown"
-        )
-        
-        # Добавляем в завершенные
-        order['completed_at'] = datetime.now().strftime("%d.%m.%Y %H:%M")
-        order['status'] = 'completed'
-        order['completed_by'] = 'admin'
-        completed_orders[order_ref] = order
-        
-        # Удаляем из активных
-        del active_orders[order_ref]
-        
-        # Удаляем из активных чатов
-        if order['buyer_id'] in active_chats:
-            del active_chats[order['buyer_id']]
-        
-        save_data()
-        
-        bot.answer_callback_query(call.id, "✅ Заказ принудительно завершен")
-        
-        # Возвращаемся к списку активных заказов
-        show_active_orders(chat_id)
-
-# ====== ФУНКЦИИ ДЛЯ АДМИН-ЧАТОВ ======
-
-def show_admin_chat(chat_id, chat_ref):
-    """Показать историю админ-чата"""
-    if chat_ref not in admin_chats:
-        bot.send_message(chat_id, f"❌ Чат {chat_ref} не найден")
-        return
-    
-    chat = admin_chats[chat_ref]
-    history = format_admin_chat_history(chat_ref)
-    
-    bot.send_message(
-        chat_id,
-        history,
-        parse_mode="Markdown"
-    )
-    
-    bot.send_message(
-        chat_id,
-        "Выберите действие:",
-        reply_markup=get_admin_chat_actions_keyboard(chat_ref)
-    )
-
-def close_admin_chat(chat_id, chat_ref):
-    """Завершить админ-чат"""
-    if chat_ref not in admin_chats:
-        bot.send_message(chat_id, f"❌ Чат {chat_ref} не найден")
-        return
-    
-    chat = admin_chats[chat_ref]
-    
-    if chat['status'] != 'active':
-        bot.send_message(chat_id, f"❌ Чат {chat_ref} уже завершен")
-        return
-    
-    # Меняем статус
-    chat['status'] = 'completed'
-    chat['completed'] = datetime.now().strftime("%d.%m.%Y %H:%M")
-    
-    # Уведомляем покупателя
-    bot.send_message(
-        chat['user_id'],
-        "✅ *Администратор завершил вопрос. Если будут новые, обязательно пишите.*",
-        parse_mode="Markdown",
-        reply_markup=get_buyer_main_keyboard()
-    )
-    
-    save_data()
-    
-    bot.send_message(
-        chat_id,
-        f"✅ Вопрос {chat_ref} завершен. Покупатель уведомлен."
-    )
-    
-    # Возвращаемся к списку
-    show_unresolved_chats(chat_id)
-
-# ====== ФУНКЦИИ ДЛЯ БЭКАПОВ ======
+# ====== ФУНКЦИИ ДЛЯ БЭКАПОВ (ПРОДОЛЖЕНИЕ) ======
 
 def show_backups_menu(chat_id):
     """Показать меню бэкапов"""
@@ -1964,7 +1647,6 @@ def show_backups_menu(chat_id):
         "Автоматические бэкапы создаются при:\n"
         "• Новом заказе\n"
         "• Завершении заказа\n"
-        "• Каждом действии в чате админа и покупателя\n"
         "• Каждые 6 часов\n\n"
         f"Последний авто-бэкап: {datetime.now().strftime('%d.%m.%Y %H:%M')}",
         parse_mode="Markdown",
@@ -2023,15 +1705,13 @@ def confirm_restore(chat_id, backup_file):
         
         active = len(backup_data.get('active_orders', {}))
         completed = len(backup_data.get('completed_orders', {}))
-        admin = len(backup_data.get('admin_chats', {}))
         
         text = (
             f"⚠️ *ВНИМАНИЕ!* Восстановление из бэкапа ЗАМЕНИТ все текущие данные:\n\n"
             f"📁 Бэкап от: {timestamp}\n\n"
             f"Текущие данные:\n"
             f"• Активных заказов: {len(active_orders)} → станет: {active}\n"
-            f"• Завершенных заказов: {len(completed_orders)} → станет: {completed}\n"
-            f"• Админ-чатов: {len(admin_chats)} → станет: {admin}\n\n"
+            f"• Завершенных заказов: {len(completed_orders)} → станет: {completed}\n\n"
             f"История сообщений будет ПОЛНОСТЬЮ ЗАМЕНЕНА.\n\n"
             f"Это действие необратимо без создания нового бэкапа.\n\n"
             f"Продолжить?"
@@ -2054,34 +1734,6 @@ def confirm_restore(chat_id, backup_file):
         bot.send_message(
             chat_id,
             f"❌ Ошибка чтения бэкапа: {str(e)}"
-        )
-
-@bot.callback_query_handler(func=lambda call: call.data.startswith('backup_do_restore_'))
-def handle_restore(call):
-    """Выполнить восстановление из бэкапа"""
-    chat_id = call.message.chat.id
-    backup_file = call.data.replace('backup_do_restore_', '')
-    
-    bot.answer_callback_query(call.id)
-    bot.send_message(chat_id, "⏳ Восстановление из бэкапа...")
-    
-    success, result = restore_from_backup(backup_file)
-    
-    if success:
-        bot.send_message(
-            chat_id,
-            f"✅ *Система успешно восстановлена из бэкапа от {result}*\n\n"
-            f"Восстановлено:\n"
-            f"• {len(active_orders)} активных заказов\n"
-            f"• {len(completed_orders)} завершенных заказов\n"
-            f"• {len(admin_chats)} админ-чатов с полной историей\n\n"
-            f"Все данные загружены. Система работает в штатном режиме.",
-            parse_mode="Markdown"
-        )
-    else:
-        bot.send_message(
-            chat_id,
-            f"❌ Ошибка восстановления: {result}"
         )
 
 # ====== ОБРАБОТЧИК ФАЙЛОВ ======
@@ -2124,7 +1776,6 @@ def handle_document(message):
         
         active = len(backup_data.get('active_orders', {}))
         completed = len(backup_data.get('completed_orders', {}))
-        admin = len(backup_data.get('admin_chats', {}))
         
         text = (
             f"✅ *Файл успешно загружен!*\n\n"
@@ -2132,8 +1783,7 @@ def handle_document(message):
             f"📅 Дата бэкапа: {timestamp}\n\n"
             f"Содержит:\n"
             f"• Активных заказов: {active}\n"
-            f"• Завершенных заказов: {completed}\n"
-            f"• Админ-чатов: {admin}\n\n"
+            f"• Завершенных заказов: {completed}\n\n"
             f"Текущие данные будут ЗАМЕНЕНЫ на данные из этого бэкапа."
         )
         
@@ -2161,14 +1811,6 @@ def handle_document(message):
         )
         if os.path.exists(temp_file):
             os.remove(temp_file)
-
-# ====== ОБРАБОТЧИК КНОПКИ ВОЗВРАТА ======
-
-@bot.callback_query_handler(func=lambda call: call.data == "back_to_order")
-def handle_back_to_order(call):
-    """Обработка кнопки возврата к оформлению заказа"""
-    bot.answer_callback_query(call.id)
-    show_instruction(call.message.chat.id)
 
 # ====== WEBHOOK ======
 
