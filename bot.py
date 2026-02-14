@@ -54,7 +54,6 @@ archive_orders = {}  # Архив завершенных заказов {order_i
 active_chats = {}   # Активные чаты {buyer_id: order_id}
 chat_history = {}   # История сообщений {order_id: [messages]}
 seller_waiting_for_order_update = {}  # Ожидание уточнения заказа {seller_id: order_id}
-waiting_for_backup_upload = set()  # Ожидание загрузки файла бэкапа
 
 # Список точек
 pickup_points = {
@@ -621,31 +620,54 @@ def handle_document(message):
     """Обработка загруженных файлов (бэкапов)"""
     user_id = message.from_user.id
     
-    # Проверяем, что это админ (убираем проверку на ожидание)
+    # Проверяем, что это админ
     if not is_admin(user_id):
         bot.send_message(user_id, "❌ У вас нет прав администратора")
         return
     
-    # Запрашиваем подтверждение сразу при получении файла
-    keyboard = telebot.types.InlineKeyboardMarkup()
-    keyboard.row(
-        telebot.types.InlineKeyboardButton("✅ Да, восстановить", callback_data=f"confirm_restore_{message.document.file_id}"),
-        telebot.types.InlineKeyboardButton("❌ Отмена", callback_data="cancel_restore")
-    )
-    
-    bot.send_message(
-        user_id,
-        f"⚠️ *ВНИМАНИЕ!*\n\n"
-        f"Вы загрузили файл: `{message.document.file_name}`\n\n"
-        f"Это ЗАМЕНИТ все текущие данные!\n\n"
-        f"Текущее состояние:\n"
-        f"📦 Активных заказов: {len(active_orders)}\n"
-        f"📚 Завершенных заказов: {len(archive_orders)}\n"
-        f"💬 Чатов в истории: {len(chat_history)}\n\n"
-        f"Вы уверены, что хотите восстановить данные из этого файла?",
-        parse_mode="Markdown",
-        reply_markup=keyboard
-    )
+    try:
+        # Отправляем сообщение о начале обработки
+        status_msg = bot.send_message(user_id, "⏳ Обрабатываю файл бэкапа...")
+        
+        # Получаем информацию о файле
+        file_info = bot.get_file(message.document.file_id)
+        downloaded_file = bot.download_file(file_info.file_path)
+        
+        # Сохраняем временный файл
+        temp_file = f"temp_backup_{user_id}_{get_current_time().strftime('%Y%m%d_%H%M%S')}.json"
+        with open(temp_file, 'wb') as f:
+            f.write(downloaded_file)
+        
+        # Пытаемся восстановить из файла
+        success, backup_path = restore_from_uploaded_file(temp_file)
+        
+        # Удаляем сообщение о статусе
+        bot.delete_message(user_id, status_msg.message_id)
+        
+        if success:
+            bot.send_message(
+                user_id,
+                f"✅ *Данные успешно восстановлены из загруженного файла!*\n\n"
+                f"📦 Активных заказов: {len(active_orders)}\n"
+                f"📚 Завершенных заказов: {len(archive_orders)}\n"
+                f"💬 Чатов в истории: {len(chat_history)}\n\n"
+                f"Файл сохранен как: `{os.path.basename(backup_path)}`",
+                parse_mode="Markdown"
+            )
+        else:
+            bot.send_message(
+                user_id,
+                "❌ *Ошибка при восстановлении из файла*\n\n"
+                "Убедитесь, что файл является корректным бэкапом.",
+                parse_mode="Markdown"
+            )
+        
+    except Exception as e:
+        bot.send_message(
+            user_id,
+            f"❌ Ошибка при обработке файла: {str(e)[:100]}"
+        )
+        print(f"❌ Ошибка обработки бэкапа: {e}")
 
 @bot.message_handler(func=lambda message: message.text == 'Каталог с ценами')
 def send_catalog(message):
@@ -883,7 +905,7 @@ def handle_callback(call):
             "📤 *Загрузка бэкапа для восстановления*\n\n"
             "Отправьте мне файл бэкапа (JSON-файл).\n\n"
             "⚠️ *ВНИМАНИЕ!*\n"
-            "Загруженный файл заменит ВСЕ текущие данные!\n\n"
+            "Загруженный файл сразу заменит ВСЕ текущие данные!\n\n"
             "Текущее состояние:\n"
             f"📦 Активных заказов: {len(active_orders)}\n"
             f"📚 Завершенных заказов: {len(archive_orders)}\n"
@@ -924,47 +946,6 @@ def handle_callback(call):
             call.message.message_id,
             parse_mode="Markdown",
             reply_markup=keyboard
-        )
-        bot.answer_callback_query(call.id)
-        return
-    
-    # ===== ОБРАБОТКА ПОДТВЕРЖДЕНИЯ ВОССТАНОВЛЕНИЯ =====
-    elif call.data.startswith('confirm_restore_'):
-        if not is_admin(user_id):
-            bot.answer_callback_query(call.id, "❌ Нет прав")
-            return
-        
-        file_id = call.data.replace('confirm_restore_', '')
-        
-        # Получаем информацию о файле из предыдущего сообщения
-        try:
-            # Ищем оригинальное сообщение с файлом
-            # Но проще будет запросить файл заново через message
-            bot.answer_callback_query(call.id, "⏳ Пожалуйста, отправьте файл еще раз")
-            
-            # Отправляем инструкцию
-            bot.send_message(
-                user_id,
-                "📤 *Отправьте файл бэкапа для восстановления*\n\n"
-                "Просто прикрепите JSON-файл в следующем сообщении.",
-                parse_mode="Markdown"
-            )
-            
-        except Exception as e:
-            bot.send_message(user_id, f"❌ Ошибка: {str(e)[:100]}")
-        
-        return
-    
-    elif call.data == "cancel_restore":
-        if not is_admin(user_id):
-            bot.answer_callback_query(call.id, "❌ Нет прав")
-            return
-        
-        bot.edit_message_text(
-            "❌ Восстановление отменено",
-            user_id,
-            call.message.message_id,
-            parse_mode="Markdown"
         )
         bot.answer_callback_query(call.id)
         return
