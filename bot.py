@@ -28,7 +28,14 @@ else:
 
 # Хранилища данных
 user_data = {}  # Для временных данных пользователей
-order_counter = 0  # Счетчик заказов
+# Счетчики заказов для каждого продавца {seller_name: counter}
+seller_counters = {
+    "Александр": 0,
+    "Юлия": 0,
+    "Евгений": 0,
+    "Татьяна": 0,
+    "Рабочий": 0
+}
 active_orders = {}  # Активные заказы {order_id: order_data}
 active_chats = {}   # Активные чаты {buyer_id: order_id}
 seller_waiting_for_order_update = {}  # Ожидание уточнения заказа {seller_id: order_id}
@@ -42,11 +49,20 @@ pickup_points = {
     "ул. Бетонная 14/1": "Рабочий"
 }
 
+# Соответствие букв продавцам
+seller_letters = {
+    "Александр": "А",
+    "Юлия": "Ю",
+    "Евгений": "Е",
+    "Татьяна": "Т",
+    "Рабочий": "Р"
+}
+
 # ====== ФУНКЦИИ ДЛЯ РАБОТЫ С ФАЙЛАМИ ======
 def save_data():
-    """Сохраняем активные заказы и счетчик в файл"""
+    """Сохраняем активные заказы и счетчики в файл"""
     data = {
-        'order_counter': order_counter,
+        'seller_counters': seller_counters,
         'active_orders': {}
     }
     
@@ -62,8 +78,8 @@ def save_data():
         print(f"❌ Ошибка сохранения данных: {e}")
 
 def load_data():
-    """Загружаем активные заказы и счетчик из файла"""
-    global order_counter, active_orders, active_chats
+    """Загружаем активные заказы и счетчики из файла"""
+    global seller_counters, active_orders, active_chats
     
     if not os.path.exists(DATA_FILE):
         print("📁 Файл данных не найден, начинаем с нуля")
@@ -73,18 +89,19 @@ def load_data():
         with open(DATA_FILE, 'r', encoding='utf-8') as f:
             data = json.load(f)
         
-        order_counter = data.get('order_counter', 0)
+        # Загружаем счетчики продавцов
+        if 'seller_counters' in data:
+            seller_counters.update(data['seller_counters'])
+        
         active_orders = {}
         active_chats = {}
         
         # Восстанавливаем активные заказы
         loaded_orders = 0
         for order_id_str, order in data.get('active_orders', {}).items():
-            order_id = int(order_id_str)
+            order_id = str(order_id_str)  # Сохраняем как строку (формат А1, Е1 и т.д.)
             
             # ПРЕОБРАЗУЕМ ВСЕ ID ИЗ СТРОК В ЧИСЛА
-            if 'order_id' in order:
-                order['order_id'] = int(order['order_id'])
             if 'buyer_id' in order:
                 order['buyer_id'] = int(order['buyer_id'])
             if 'seller_id' in order:
@@ -99,7 +116,7 @@ def load_data():
                 print(f"🔄 Восстановлен чат: покупатель {order['buyer_id']} -> заказ #{order_id}")
         
         print(f"✅ Данные загружены: {loaded_orders} активных заказов")
-        print(f"📊 Текущий счетчик заказов: {order_counter}")
+        print(f"📊 Текущие счетчики заказов: {seller_counters}")
         print(f"💬 Активных чатов восстановлено: {len(active_chats)}")
         
         # Выводим список восстановленных заказов
@@ -190,6 +207,7 @@ def show_instruction_with_keyboard(chat_id):
     main_keyboard = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True)
     main_keyboard.add('Каталог с ценами')
     main_keyboard.add('О нас')
+    main_keyboard.add('Связь с Админом')  # Добавлена третья кнопка
     
     instruction_text = (
         "🟢 *Пошаговая инструкция:*\n\n"
@@ -299,13 +317,51 @@ def send_about(message):
     )
     bot.send_message(message.chat.id, about_text, parse_mode="Markdown")
 
+@bot.message_handler(func=lambda message: message.text == 'Связь с Админом')
+def contact_admin(message):
+    """Обработка кнопки связи с админом"""
+    admin_contact_text = (
+        "👑 *Связь с администратором*\n\n"
+        "Для связи с администратором нажмите кнопку ниже:"
+    )
+    
+    # Создаем кнопку для перехода в личные сообщения с админом
+    keyboard = telebot.types.InlineKeyboardMarkup()
+    if ADMIN_ID:
+        admin_link = f"tg://user?id={ADMIN_ID}"
+        keyboard.add(telebot.types.InlineKeyboardButton(
+            text="📩 Написать администратору", 
+            url=admin_link
+        ))
+    else:
+        keyboard.add(telebot.types.InlineKeyboardButton(
+            text="❌ Администратор не доступен", 
+            callback_data="admin_unavailable"
+        ))
+    
+    bot.send_message(
+        message.chat.id,
+        admin_contact_text,
+        parse_mode="Markdown",
+        reply_markup=keyboard
+    )
+
+@bot.callback_query_handler(func=lambda call: call.data == "admin_unavailable")
+def handle_admin_unavailable(call):
+    """Обработка нажатия на недоступного админа"""
+    bot.answer_callback_query(call.id, "❌ Администратор временно недоступен")
+    bot.send_message(
+        call.message.chat.id,
+        "⚠️ Администратор временно недоступен. Пожалуйста, попробуйте позже или напишите менеджеру на точке."
+    )
+
 @bot.message_handler(func=lambda message: True, content_types=['text'])
 def handle_text(message):
     user_id = message.from_user.id
     text = message.text.strip()
     
     # Пропускаем команды, которые уже обработаны
-    if text in ['Каталог с ценами', 'О нас']:
+    if text in ['Каталог с ценами', 'О нас', 'Связь с Админом']:
         return
     
     # --- АДМИНИСТРАТОР ---
@@ -315,7 +371,7 @@ def handle_text(message):
             try:
                 parts = text.split(' ', 1)
                 order_num = parts[0][1:]
-                order_id = int(order_num)
+                order_id = order_num  # Теперь это строка (А1, Е1 и т.д.)
                 message_text = parts[1] if len(parts) > 1 else ""
                 
                 if not message_text:
@@ -346,8 +402,6 @@ def handle_text(message):
                 else:
                     bot.send_message(user_id, f"❌ Заказ #{order_id} не найден")
                     
-            except ValueError:
-                bot.send_message(user_id, "❌ Неправильный номер заказа")
             except Exception as e:
                 bot.send_message(user_id, f"❌ Ошибка: {str(e)[:100]}")
         else:
@@ -421,7 +475,7 @@ def handle_text(message):
             try:
                 parts = text.split(' ', 1)
                 order_num = parts[0][1:]
-                order_id = int(order_num)
+                order_id = order_num  # Теперь это строка (А1, Е1 и т.д.)
                 message_text = parts[1] if len(parts) > 1 else ""
                 
                 if not message_text:
@@ -456,8 +510,6 @@ def handle_text(message):
                 else:
                     bot.send_message(user_id, f"❌ Заказ #{order_id} не найден")
                     
-            except ValueError:
-                bot.send_message(user_id, "❌ Неправильный номер заказа. Используйте #1, #2 и т.д.")
             except Exception as e:
                 bot.send_message(user_id, f"❌ Ошибка: {str(e)[:100]}")
         else:
@@ -470,7 +522,7 @@ def handle_text(message):
                     f"📋 *У вас {len(seller_active_orders)} активных заказов:*\n\n"
                     f"{orders_list}\n\n"
                     f"💬 *Чтобы ответить покупателю, начните сообщение с номера заказа:*\n"
-                    f"Пример: `#1 Здравствуйте! Ваш заказ будет готов через час`"
+                    f"Пример: `#А1 Здравствуйте! Ваш заказ будет готов через час`"
                 )
             else:
                 bot.send_message(user_id, "❌ У вас нет активных заказов.")
@@ -625,7 +677,7 @@ def handle_callback(call):
         if not is_admin(user_id):
             bot.answer_callback_query(call.id, "❌ Нет прав")
             return
-        bot.send_message(user_id, "🔍 Введите номер заказа в формате: /search 7")
+        bot.send_message(user_id, "🔍 Введите номер заказа в формате: /search А1")
         bot.answer_callback_query(call.id)
         return
     
@@ -634,7 +686,7 @@ def handle_callback(call):
             bot.answer_callback_query(call.id, "❌ Нет прав")
             return
         
-        order_id = int(call.data.split('_')[2])
+        order_id = call.data.split('_')[2]  # Теперь это строка (А1, Е1 и т.д.)
         order = active_orders.get(order_id)
         
         if order:
@@ -678,10 +730,11 @@ def handle_callback(call):
         buyer_name = user_info['name']
         buyer_id = user_info['user_id']
         
-        # Генерируем ID заказа
-        global order_counter
-        order_counter += 1
-        order_id = order_counter
+        # Генерируем ID заказа в формате А1, Е1 и т.д.
+        global seller_counters
+        seller_counters[seller_name] += 1
+        seller_letter = seller_letters[seller_name]
+        order_id = f"{seller_letter}{seller_counters[seller_name]}"
         
         # Сохраняем заказ
         order_data = {
@@ -724,7 +777,7 @@ def handle_callback(call):
         if len(seller_active_orders) > 1:
             seller_message += f"\n\n📋 *Ваши активные заказы:* {', '.join([f'#{oid}' for oid in seller_active_orders])}"
         
-        seller_message += "\n\n💬 *Чтобы ответить покупателю, напишите:*\n`#" + str(order_id) + " ваш_текст`"
+        seller_message += "\n\n💬 *Чтобы ответить покупателю, напишите:*\n`#" + order_id + " ваш_текст`"
         
         try:
             bot.send_message(seller_id, seller_message, parse_mode="Markdown", reply_markup=seller_keyboard)
@@ -787,7 +840,7 @@ def search_order(message):
         return
     
     try:
-        order_id = int(message.text.split()[1])
+        order_id = message.text.split()[1]  # Теперь это строка (А1, Е1 и т.д.)
         order = active_orders.get(order_id)
         
         if order:
@@ -806,13 +859,13 @@ def search_order(message):
             bot.send_message(user_id, f"❌ Заказ #{order_id} не найден")
             
     except (IndexError, ValueError):
-        bot.send_message(user_id, "❌ Используйте: /search 7")
+        bot.send_message(user_id, "❌ Используйте: /search А1")
 
 def handle_seller_update_callback(call):
     """Обработка кнопки 'Уточнить заказ'"""
     seller_id = call.from_user.id
     parts = call.data.split('_')
-    order_id = int(parts[2])
+    order_id = parts[2]  # Теперь это строка (А1, Е1 и т.д.)
     
     order = active_orders.get(order_id)
     
@@ -839,7 +892,7 @@ def handle_seller_close_callback(call):
     """Обработка кнопки 'Завершить заказ'"""
     seller_id = call.from_user.id
     parts = call.data.split('_')
-    order_id = int(parts[2])
+    order_id = parts[2]  # Теперь это строка (А1, Е1 и т.д.)
     
     order = active_orders.get(order_id)
     
