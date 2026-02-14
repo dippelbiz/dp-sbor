@@ -8,16 +8,13 @@ import threading
 import shutil
 
 # ====== НАСТРОЙКИ ЧАСОВОГО ПОЯСА ======
-# Новосибирск (UTC+7)
 NOVOSIBIRSK_OFFSET = 7
 
 def get_novosibirsk_time():
-    """Возвращает текущее время в Новосибирске (UTC+7)"""
     utc_time = datetime.now(timezone.utc)
     return utc_time + timedelta(hours=NOVOSIBIRSK_OFFSET)
 
 def format_time(dt=None):
-    """Форматирует время"""
     if dt is None:
         dt = get_novosibirsk_time()
     if isinstance(dt, str):
@@ -25,13 +22,11 @@ def format_time(dt=None):
     return dt.strftime("%d.%m.%Y %H:%M:%S")
 
 def format_date(dt=None):
-    """Форматирует только дату"""
     if dt is None:
         dt = get_novosibirsk_time()
     return dt.strftime("%d.%m.%Y")
 
 def format_time_only(dt=None):
-    """Форматирует только время"""
     if dt is None:
         dt = get_novosibirsk_time()
     return dt.strftime("%H:%M")
@@ -45,19 +40,16 @@ if not TOKEN:
 bot = telebot.TeleBot(TOKEN)
 app = Flask(__name__)
 
-# Имя файла для хранения данных
 DATA_FILE = 'bot_data.json'
 
-# ADMIN ID
 ADMIN_ID = os.environ.get('ADMIN_ID')
 if ADMIN_ID:
     ADMIN_ID = int(ADMIN_ID)
     print(f"👑 Администратор: {ADMIN_ID}")
 else:
-    print("⚠️ ADMIN_ID не установлен! Функции администратора недоступны")
+    print("⚠️ ADMIN_ID не установлен!")
     ADMIN_ID = None
 
-# Сокращения для продавцов (для нумерации заказов)
 SELLER_CODES = {
     "Александр": "А",
     "Юлия": "Ю",
@@ -66,10 +58,8 @@ SELLER_CODES = {
     "Рабочий": "Р"
 }
 
-# Обратное соответствие
 CODE_TO_SELLER = {v: k for k, v in SELLER_CODES.items()}
 
-# Список точек
 pickup_points = {
     "ул. Галущака 15": "Александр",
     "ул. Беловежская 4/1": "Юлия", 
@@ -78,18 +68,16 @@ pickup_points = {
     "ул. Бетонная 14/1": "Рабочий"
 }
 
-# Хранилища данных (упрощенные)
-user_data = {}  # Временные данные
-seller_counters = {}  # Счетчики {seller_name: counter}
-active_orders = {}  # Активные заказы {order_id: order_data}
-completed_orders = {}  # Завершенные заказы {order_id: order_data}
-active_chats = {}  # Активные чаты {buyer_id: order_id}
-admin_chats = {}  # Чаты с админом {buyer_id: messages}
-admin_chat_counter = 0  # Счетчик чатов
+user_data = {}
+seller_counters = {}
+active_orders = {}
+completed_orders = {}
+active_chats = {}
+admin_chats = {}
+admin_chat_counter = 0
 
-# ====== ФУНКЦИИ ДЛЯ РАБОТЫ С ID ЗАКАЗОВ ======
+# ====== ФУНКЦИИ ======
 def generate_order_id(seller_name):
-    """Генерирует ID заказа вида А1, А2, Е1 и т.д."""
     code = SELLER_CODES[seller_name]
     if seller_name not in seller_counters:
         seller_counters[seller_name] = 0
@@ -97,7 +85,6 @@ def generate_order_id(seller_name):
     return f"{code}{seller_counters[seller_name]}"
 
 def parse_order_id(order_id):
-    """Парсит А1 в (seller_name, number)"""
     if not order_id or len(order_id) < 2:
         return None, None
     code = order_id[0]
@@ -108,9 +95,7 @@ def parse_order_id(order_id):
     except:
         return None, None
 
-# ====== ФУНКЦИИ ДЛЯ РАБОТЫ С ФАЙЛАМИ ======
 def save_data():
-    """Сохраняем все данные"""
     data = {
         'seller_counters': seller_counters,
         'active_orders': active_orders,
@@ -118,7 +103,6 @@ def save_data():
         'admin_chats': admin_chats,
         'admin_chat_counter': admin_chat_counter
     }
-    
     try:
         with open(DATA_FILE, 'w', encoding='utf-8') as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
@@ -127,37 +111,28 @@ def save_data():
         print(f"❌ Ошибка сохранения: {e}")
 
 def load_data():
-    """Загружаем данные"""
     global seller_counters, active_orders, completed_orders, active_chats, admin_chats, admin_chat_counter
-    
     if not os.path.exists(DATA_FILE):
         print("📁 Новый файл данных")
         return
-    
     try:
         with open(DATA_FILE, 'r', encoding='utf-8') as f:
             data = json.load(f)
-        
         seller_counters = data.get('seller_counters', {})
         active_orders = data.get('active_orders', {})
         completed_orders = data.get('completed_orders', {})
         admin_chats = data.get('admin_chats', {})
         admin_chat_counter = data.get('admin_chat_counter', 0)
-        
-        # Восстанавливаем активные чаты
         active_chats = {}
         for order_id, order in active_orders.items():
             if 'buyer_id' in order:
                 active_chats[order['buyer_id']] = order_id
-        
         print(f"✅ Загружено: {len(active_orders)} активных, {len(completed_orders)} завершенных")
-        
     except Exception as e:
         print(f"❌ Ошибка загрузки: {e}")
 
 load_data()
 
-# ====== ФУНКЦИИ ДЛЯ ПРОВЕРКИ ПРАВ ======
 def is_admin(user_id):
     return ADMIN_ID is not None and user_id == ADMIN_ID
 
@@ -200,9 +175,7 @@ def is_seller(user_id):
 def get_buyer_link(buyer_id):
     return f"tg://user?id={buyer_id}"
 
-# ====== БЭКАПЫ ======
 def create_backup(reason=""):
-    """Создает бэкап"""
     if not ADMIN_ID:
         return
     try:
@@ -219,10 +192,20 @@ def create_backup(reason=""):
     except Exception as e:
         print(f"❌ Ошибка бэкапа: {e}")
 
-# ====== ИНТЕРФЕЙС ======
-def show_main_menu(chat_id):
-    """Главное меню"""
+# ====== ФУНКЦИИ ИНТЕРФЕЙСА ======
+def show_instruction(chat_id):
+    """Показывает пошаговую инструкцию"""
+    text = (
+        "🟢 *Пошаговая инструкция:*\n\n"
+        "1️⃣ Напишите, что хотите заказать\n"
+        "2️⃣ Выберите точку самовывоза\n"
+        "3️⃣ Менеджер свяжется с вами\n\n"
+        "После оформления заказа вы сможете общаться с менеджером прямо в этом чате."
+    )
+    
+    # Основная клавиатура
     keyboard = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True)
+    
     if is_seller(chat_id):
         keyboard.row('📋 Мои заказы')
         keyboard.row('📋 Каталог', 'ℹ️ О нас')
@@ -233,13 +216,24 @@ def show_main_menu(chat_id):
     else:
         keyboard.row('📋 Каталог', 'ℹ️ О нас')
         keyboard.row('👤 Связаться с админом')
-    bot.send_message(chat_id, "🟢 *Главное меню*", parse_mode="Markdown", reply_markup=keyboard)
+    
+    bot.send_message(chat_id, text, parse_mode="Markdown", reply_markup=keyboard)
 
+def add_back_button(chat_id, text):
+    """Добавляет кнопку возврата к инструкции"""
+    keyboard = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True)
+    keyboard.row('🔙 Вернуться к оформлению заказа')
+    bot.send_message(chat_id, text, parse_mode="Markdown", reply_markup=keyboard)
+
+# ====== ОБРАБОТЧИКИ ======
 @bot.message_handler(commands=['start'])
 def start(message):
-    show_main_menu(message.chat.id)
+    show_instruction(message.chat.id)
 
-# ====== КАТАЛОГ И О НАС ======
+@bot.message_handler(func=lambda m: m.text == '🔙 Вернуться к оформлению заказа')
+def back_to_instruction(message):
+    show_instruction(message.chat.id)
+
 @bot.message_handler(func=lambda m: m.text == '📋 Каталог')
 def catalog(message):
     text = (
@@ -251,32 +245,34 @@ def catalog(message):
         "5. Клубника сушеная 500г - 350₽\n"
         "6. Фисташки 500г - 600₽"
     )
-    bot.send_message(message.chat.id, text, parse_mode="Markdown")
+    add_back_button(message.chat.id, text)
 
 @bot.message_handler(func=lambda m: m.text == 'ℹ️ О нас')
 def about(message):
     text = (
         "🏢 *DP SBOR*\n"
         "Отборные орехи и сухофрукты\n"
-        "📍 Новосибирск\n"
+        "📍 Новосибирск\n\n"
         "Канал: @dp_sbor"
     )
-    bot.send_message(message.chat.id, text, parse_mode="Markdown")
+    add_back_button(message.chat.id, text)
 
-# ====== СВЯЗЬ С АДМИНОМ ======
 @bot.message_handler(func=lambda m: m.text == '👤 Связаться с админом')
 def contact_admin_start(message):
-    bot.send_message(
+    add_back_button(
         message.chat.id,
         "👤 Напишите сообщение администратору:"
     )
     bot.register_next_step_handler(message, contact_admin_send)
 
 def contact_admin_send(message):
+    if message.text == '🔙 Вернуться к оформлению заказа':
+        show_instruction(message.chat.id)
+        return
+    
     user_id = message.from_user.id
     text = message.text
     
-    # Сохраняем в историю
     global admin_chat_counter
     if user_id not in admin_chats:
         admin_chat_counter += 1
@@ -293,9 +289,8 @@ def contact_admin_send(message):
     })
     save_data()
     
-    bot.send_message(user_id, "✅ Отправлено!")
+    add_back_button(user_id, "✅ Сообщение отправлено администратору!")
     
-    # Уведомление админу
     if ADMIN_ID:
         link = get_buyer_link(user_id)
         admin_text = (
@@ -312,35 +307,6 @@ def contact_admin_send(message):
         )
         bot.send_message(ADMIN_ID, admin_text, parse_mode="Markdown", reply_markup=keyboard)
 
-# ====== АДМИН: СООБЩЕНИЯ ======
-@bot.message_handler(func=lambda m: m.text == '📬 Сообщения')
-def admin_chats_list(message):
-    if not is_admin(message.from_user.id):
-        return
-    active = []
-    for uid, chat in admin_chats.items():
-        if not chat.get('closed', False):
-            active.append((uid, chat))
-    
-    if not active:
-        bot.send_message(message.from_user.id, "📭 Нет новых сообщений")
-        return
-    
-    for uid, chat in active:
-        last = chat['messages'][-1] if chat['messages'] else {'text': '', 'time': ''}
-        text = (
-            f"📩 *#{chat['id']} {chat['name']}*\n"
-            f"🕐 {last['time']}\n"
-            f"📝 {last['text'][:50]}..."
-        )
-        keyboard = telebot.types.InlineKeyboardMarkup()
-        keyboard.row(
-            telebot.types.InlineKeyboardButton("👀 Открыть", callback_data=f"chat_{uid}"),
-            telebot.types.InlineKeyboardButton("✅ Закрыть", callback_data=f"close_{uid}")
-        )
-        bot.send_message(message.from_user.id, text, parse_mode="Markdown", reply_markup=keyboard)
-
-# ====== ПРОДАВЕЦ: МОИ ЗАКАЗЫ ======
 @bot.message_handler(func=lambda m: m.text == '📋 Мои заказы')
 def seller_orders_list(message):
     user_id = message.from_user.id
@@ -354,7 +320,7 @@ def seller_orders_list(message):
             my_orders.append((oid, order))
     
     if not my_orders:
-        bot.send_message(user_id, "📭 Нет активных заказов")
+        add_back_button(user_id, "📭 Нет активных заказов")
         return
     
     for oid, order in my_orders:
@@ -370,15 +336,17 @@ def seller_orders_list(message):
             telebot.types.InlineKeyboardButton("✅ Завершить", callback_data=f"close_{oid}")
         )
         bot.send_message(user_id, text, parse_mode="Markdown", reply_markup=keyboard)
+    
+    # Добавляем кнопку возврата
+    add_back_button(user_id, "🔙 Вернуться в меню")
 
-# ====== АДМИН: АКТИВНЫЕ ЗАКАЗЫ ======
 @bot.message_handler(func=lambda m: m.text == '📋 Активные заказы')
 def admin_active_orders(message):
     if not is_admin(message.from_user.id):
         return
     
     if not active_orders:
-        bot.send_message(message.from_user.id, "📭 Нет активных заказов")
+        add_back_button(message.from_user.id, "📭 Нет активных заказов")
         return
     
     for oid, order in active_orders.items():
@@ -397,18 +365,19 @@ def admin_active_orders(message):
             telebot.types.InlineKeyboardButton("✅ Завершить", callback_data=f"admin_close_{oid}")
         )
         bot.send_message(message.from_user.id, text, parse_mode="Markdown", reply_markup=keyboard)
+    
+    add_back_button(message.from_user.id, "🔙 Вернуться в меню")
 
-# ====== АДМИН: ЗАВЕРШЕННЫЕ ЗАКАЗЫ ======
 @bot.message_handler(func=lambda m: m.text == '📦 Завершенные')
 def admin_completed_orders(message):
     if not is_admin(message.from_user.id):
         return
     
     if not completed_orders:
-        bot.send_message(message.from_user.id, "📭 Нет завершенных заказов")
+        add_back_button(message.from_user.id, "📭 Нет завершенных заказов")
         return
     
-    for oid, order in list(completed_orders.items())[-10:]:  # Последние 10
+    for oid, order in list(completed_orders.items())[-10:]:
         link = get_buyer_link(order['buyer_id'])
         text = (
             f"✅ *Заказ {oid}*\n"
@@ -422,28 +391,58 @@ def admin_completed_orders(message):
         keyboard = telebot.types.InlineKeyboardMarkup()
         keyboard.row(telebot.types.InlineKeyboardButton("👀 История", callback_data=f"history_{oid}"))
         bot.send_message(message.from_user.id, text, parse_mode="Markdown", reply_markup=keyboard)
+    
+    add_back_button(message.from_user.id, "🔙 Вернуться в меню")
 
-# ====== АДМИН: БЭКАП ======
+@bot.message_handler(func=lambda m: m.text == '📬 Сообщения')
+def admin_chats_list(message):
+    if not is_admin(message.from_user.id):
+        return
+    
+    active = []
+    for uid, chat in admin_chats.items():
+        if not chat.get('closed', False):
+            active.append((uid, chat))
+    
+    if not active:
+        add_back_button(message.from_user.id, "📭 Нет новых сообщений")
+        return
+    
+    for uid, chat in active:
+        last = chat['messages'][-1] if chat['messages'] else {'text': '', 'time': ''}
+        text = (
+            f"📩 *#{chat['id']} {chat['name']}*\n"
+            f"🕐 {last['time']}\n"
+            f"📝 {last['text'][:50]}..."
+        )
+        keyboard = telebot.types.InlineKeyboardMarkup()
+        keyboard.row(
+            telebot.types.InlineKeyboardButton("👀 Открыть", callback_data=f"chat_{uid}"),
+            telebot.types.InlineKeyboardButton("✅ Закрыть", callback_data=f"close_{uid}")
+        )
+        bot.send_message(message.from_user.id, text, parse_mode="Markdown", reply_markup=keyboard)
+    
+    add_back_button(message.from_user.id, "🔙 Вернуться в меню")
+
 @bot.message_handler(func=lambda m: m.text == '💾 Бэкап')
 def admin_backup(message):
     if not is_admin(message.from_user.id):
         return
     bot.send_message(message.from_user.id, "⏳ Создаю бэкап...")
     create_backup("Ручной бэкап")
-    bot.send_message(message.from_user.id, "✅ Готово!")
+    add_back_button(message.from_user.id, "✅ Бэкап создан!")
 
-# ====== ОБРАБОТКА СООБЩЕНИЙ ======
 @bot.message_handler(func=lambda m: True, content_types=['text'])
 def handle_text(message):
     user_id = message.from_user.id
     text = message.text.strip()
     
-    # Пропускаем команды меню
-    if text in ['📋 Каталог', 'ℹ️ О нас', '📋 Мои заказы', '👤 Связаться с админом',
-                '📋 Активные заказы', '📦 Завершенные', '📬 Сообщения', '💾 Бэкап']:
+    # Обработка возврата
+    if text == '🔙 Вернуться к оформлению заказа':
+        show_instruction(user_id)
         return
     
-    # --- ПРОДАВЕЦ: ответ на заказ через #А1 текст ---
+    # Продавец: ответ на заказ
     if is_seller(user_id) and text.startswith('#'):
         parts = text[1:].split(' ', 1)
         order_id = parts[0].strip().upper()
@@ -462,7 +461,6 @@ def handle_text(message):
             bot.send_message(user_id, f"❌ Это не ваш заказ")
             return
         
-        # Отправляем покупателю
         try:
             bot.send_message(
                 order['buyer_id'],
@@ -470,7 +468,6 @@ def handle_text(message):
             )
             bot.send_message(user_id, f"✅ Отправлено для {order_id}")
             
-            # Сохраняем в историю заказа
             if 'messages' not in order:
                 order['messages'] = []
             order['messages'].append({
@@ -484,12 +481,11 @@ def handle_text(message):
             bot.send_message(user_id, f"❌ Ошибка: {str(e)[:100]}")
         return
     
-    # --- ПОКУПАТЕЛЬ: новый заказ ---
+    # Покупатель: новый заказ
     if user_id in active_chats:
         bot.send_message(user_id, "⚠️ У вас уже есть активный заказ")
         return
     
-    # Выбор точки
     user_data[user_id] = {
         'text': text,
         'name': message.from_user.first_name or "Покупатель"
@@ -501,13 +497,11 @@ def handle_text(message):
     
     bot.send_message(user_id, "📍 Выберите точку:", reply_markup=keyboard)
 
-# ====== ОБРАБОТКА КНОПОК ======
 @bot.callback_query_handler(func=lambda call: True)
 def handle_callback(call):
     user_id = call.from_user.id
     data = call.data
     
-    # --- Выбор адреса ---
     if data.startswith('addr_'):
         address = data[5:]
         seller_name = pickup_points[address]
@@ -517,7 +511,6 @@ def handle_callback(call):
             bot.answer_callback_query(call.id, "❌ Ошибка")
             return
         
-        # Создаем заказ
         order_id = generate_order_id(seller_name)
         buyer_data = user_data.get(user_id, {})
         
@@ -538,7 +531,6 @@ def handle_callback(call):
         active_chats[user_id] = order_id
         save_data()
         
-        # Уведомление продавцу
         try:
             seller_text = (
                 f"📦 *Новый заказ {order_id}*\n"
@@ -560,7 +552,6 @@ def handle_callback(call):
         
         save_data()
         
-        # Уведомление админу
         if ADMIN_ID:
             link = get_buyer_link(user_id)
             admin_text = (
@@ -572,18 +563,15 @@ def handle_callback(call):
             )
             bot.send_message(ADMIN_ID, admin_text, parse_mode="Markdown")
         
-        # Ответ покупателю
         bot.edit_message_text(
             f"✅ Заказ {order_id} принят!\n📍 {address}\nМенеджер скоро свяжется",
             user_id,
             call.message.message_id
         )
         
-        # Бэкап
         create_backup(f"Новый заказ {order_id}")
         bot.answer_callback_query(call.id)
     
-    # --- Продавец: уточнить заказ ---
     elif data.startswith('update_'):
         order_id = data[7:]
         if order_id not in active_orders:
@@ -597,7 +585,6 @@ def handle_callback(call):
         )
         bot.answer_callback_query(call.id)
     
-    # --- Продавец/Админ: завершить заказ ---
     elif data.startswith('close_') or data.startswith('admin_close_'):
         is_admin_close = data.startswith('admin_close_')
         order_id = data[12:] if is_admin_close else data[6:]
@@ -610,16 +597,13 @@ def handle_callback(call):
         order['completed_time'] = format_time()
         order['completed_by'] = 'admin' if is_admin_close else 'seller'
         
-        # Сохраняем в завершенные
         completed_orders[order_id] = order
         
-        # Удаляем из активных чатов
         if order['buyer_id'] in active_chats:
             del active_chats[order['buyer_id']]
         
         save_data()
         
-        # Уведомление покупателю
         buyer_text = (
             f"✅ *Заказ {order_id} завершен*\n"
             f"📍 {order['address']}\n"
@@ -628,7 +612,6 @@ def handle_callback(call):
         )
         bot.send_message(order['buyer_id'], buyer_text, parse_mode="Markdown")
         
-        # Уведомление админу если завершил продавец
         if not is_admin_close and ADMIN_ID:
             link = get_buyer_link(order['buyer_id'])
             admin_text = (
@@ -644,11 +627,9 @@ def handle_callback(call):
             call.message.message_id
         )
         
-        # Бэкап
         create_backup(f"Заказ {order_id} завершен")
         bot.answer_callback_query(call.id)
     
-    # --- История заказа (для админа) ---
     elif data.startswith('history_'):
         order_id = data[8:]
         order = active_orders.get(order_id) or completed_orders.get(order_id)
@@ -675,7 +656,6 @@ def handle_callback(call):
             from_who = "👤 Продавец" if msg['from'] == 'seller' else "👤 Покупатель"
             text += f"{from_who} ({msg['time']}): {msg['text']}\n"
         
-        # Кнопка для связи с покупателем
         keyboard = telebot.types.InlineKeyboardMarkup()
         keyboard.row(
             telebot.types.InlineKeyboardButton(
@@ -687,7 +667,6 @@ def handle_callback(call):
         bot.send_message(user_id, text, parse_mode="Markdown", reply_markup=keyboard)
         bot.answer_callback_query(call.id)
     
-    # --- Связаться с покупателем из истории ---
     elif data.startswith('contact_buyer_'):
         buyer_id = int(data[14:])
         bot.send_message(
@@ -697,7 +676,6 @@ def handle_callback(call):
         bot.register_next_step_handler_by_chat_id(user_id, send_to_buyer, buyer_id)
         bot.answer_callback_query(call.id)
     
-    # --- Чат с админом ---
     elif data.startswith('chat_'):
         buyer_id = int(data[5:])
         if buyer_id not in admin_chats:
@@ -713,13 +691,12 @@ def handle_callback(call):
         keyboard = telebot.types.InlineKeyboardMarkup()
         keyboard.row(
             telebot.types.InlineKeyboardButton("✏️ Ответить", callback_data=f"reply_{buyer_id}"),
-            telebot.types.InlineKeyboardButton("✅ Закрыть", callback_data=f"closechat_{buyer_id}")
+            telebot.types.InlineKeyboardButton("✅ Закрыть", callback_data=f"close_{buyer_id}")
         )
         
         bot.send_message(user_id, text, parse_mode="Markdown", reply_markup=keyboard)
         bot.answer_callback_query(call.id)
     
-    # --- Ответить в чате с админом ---
     elif data.startswith('reply_'):
         buyer_id = int(data[6:])
         bot.send_message(
@@ -729,14 +706,8 @@ def handle_callback(call):
         bot.register_next_step_handler_by_chat_id(user_id, reply_to_buyer, buyer_id)
         bot.answer_callback_query(call.id)
     
-    # --- Закрыть чат с админом ---
-    elif data.startswith('closechat_') or data.startswith('close_') and len(data) > 6 and '_' in data[6:]:
-        if data.startswith('closechat_'):
-            buyer_id = int(data[10:])
-        else:
-            # Это может быть close_ от продавца, но мы уже обработали выше
-            return
-        
+    elif data.startswith('close_') and len(data) > 6 and data[6:].isdigit():
+        buyer_id = int(data[6:])
         if buyer_id in admin_chats:
             admin_chats[buyer_id]['closed'] = True
             save_data()
@@ -744,7 +715,10 @@ def handle_callback(call):
         bot.answer_callback_query(call.id)
 
 def send_to_buyer(message, buyer_id):
-    """Отправка сообщения покупателю от админа"""
+    if message.text == '🔙 Вернуться к оформлению заказа':
+        show_instruction(message.chat.id)
+        return
+    
     text = message.text
     try:
         bot.send_message(
@@ -752,12 +726,15 @@ def send_to_buyer(message, buyer_id):
             f"👑 *Сообщение от администратора:*\n\n{text}",
             parse_mode="Markdown"
         )
-        bot.send_message(message.chat.id, "✅ Отправлено!")
+        add_back_button(message.chat.id, "✅ Отправлено!")
     except Exception as e:
-        bot.send_message(message.chat.id, f"❌ Ошибка: {str(e)[:100]}")
+        add_back_button(message.chat.id, f"❌ Ошибка: {str(e)[:100]}")
 
 def reply_to_buyer(message, buyer_id):
-    """Ответ в чате с админом"""
+    if message.text == '🔙 Вернуться к оформлению заказа':
+        show_instruction(message.chat.id)
+        return
+    
     text = message.text
     if buyer_id in admin_chats:
         admin_chats[buyer_id]['messages'].append({
@@ -767,13 +744,12 @@ def reply_to_buyer(message, buyer_id):
         })
         save_data()
         
-        # Отправляем покупателю
         bot.send_message(
             buyer_id,
             f"💬 *Ответ от администратора:*\n\n{text}",
             parse_mode="Markdown"
         )
-        bot.send_message(message.chat.id, "✅ Отправлено!")
+        add_back_button(message.chat.id, "✅ Отправлено!")
 
 # ====== WEBHOOK ======
 @app.route('/webhook', methods=['POST'])
