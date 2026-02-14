@@ -680,8 +680,8 @@ def send_catalog(message):
         "*Кешью WW320*, 1000г - 1000 ₽\n\n"
         " *Сухофрукты *\n\n"
         "*Манго сушеное без сахара*, 500г - 250 ₽\n"
-        "*Клубника сушеная*, 500г- 350 ₽\n\n"
-        "*Папайя сушеная без сахара*, 500г - 350 ₽\n"
+        "*Клубника сушеная*, 500г- 350 ₽\n"
+        "*Папайя сушеная без сахара*, 500г - 350 ₽\n\n"
         "*Для заказа напишите что Вам нужно*"
     )
     bot.send_message(message.chat.id, catalog_text, parse_mode="Markdown")
@@ -1739,5 +1739,6 @@ if __name__ == '__main__':
     
     port = int(os.environ.get('PORT', 10000))
     app.run(host='0.0.0.0', port=port, debug=False)
+
 
 
