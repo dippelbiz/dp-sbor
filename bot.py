@@ -1309,14 +1309,27 @@ def search_order(message):
             
     except (IndexError, ValueError):
         bot.send_message(user_id, "❌ Используйте: /search А1")
-
 @bot.message_handler(func=lambda message: True, content_types=['text'])
 def handle_text(message):
     user_id = message.from_user.id
     text = message.text.strip()
     
-    # Пропускаем команды, которые уже обработаны
-    if text in ['📦 Сделать заказ', '📋 Каталог с ценами', '🏢 О нас', '👑 Связь с Админом']:
+    # ===== ОБРАБОТКА КНОПОК ГЛАВНОГО МЕНЮ =====
+    # Эти кнопки должны работать всегда, даже если есть активный чат
+    if text == '📦 Сделать заказ':
+        show_instruction(message.chat.id)
+        return
+    
+    if text == '📋 Каталог с ценами':
+        send_catalog(message)
+        return
+    
+    if text == '🏢 О нас':
+        send_about(message)
+        return
+    
+    if text == '👑 Связь с Админом':
+        contact_admin(message)
         return
     
     # --- АДМИНИСТРАТОР ---
@@ -1778,3 +1791,4 @@ if __name__ == '__main__':
     
     port = int(os.environ.get('PORT', 10000))
     app.run(host='0.0.0.0', port=port, debug=False)
+
